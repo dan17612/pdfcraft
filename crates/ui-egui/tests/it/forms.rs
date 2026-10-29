@@ -589,6 +589,50 @@ fn lithuanian_calendar_localizes_months_and_weekdays_without_changing_field_valu
     assert_eq!(value(&h, "due"), vec![format!("{nm:02}/15/{ny}")], "the PDF field keeps its own date format");
 }
 
+/// #449: Field Properties ▸ Format ▸ Date offered no dotted day-first pattern, so `dd.mm.yyyy`
+/// had to be typed in as a custom one. Picked from the list, the field reads a date typed day
+/// first, its calendar follows it, and the day picked is written in the pattern.
+#[test]
+fn a_date_field_takes_the_dotted_day_first_preset() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness();
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+        page: 0,
+        rect: [50.0, 40.0, 200.0, 60.0],
+        kind: pdfcraft_engine::NewField::Date,
+        name: Some("due".into()),
+    });
+    h.run_steps(4);
+    h.state_mut().open_field_props("due", 0);
+    h.run_steps(2);
+    h.get_by_label("Format").click();
+    h.run_steps(2);
+    h.get_by(|n| n.role() == Role::ComboBox && n.value().as_deref() == Some("mm/dd/yyyy")).click();
+    h.run_steps(2);
+    // The last of the list: brought into view in case the list scrolls.
+    h.get_by_label("dd.mm.yyyy").scroll_to_me();
+    h.run_steps(2);
+    h.get_by_label("dd.mm.yyyy").click();
+    h.run_steps(2);
+    // The example (10/1/2026 typed) is read day first, as the field will read it.
+    h.get_by_label("Example: 10.01.2026");
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let format = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "due").unwrap().actions.format.clone()
+    };
+    assert_eq!(format, pdfcraft_engine::form_scripts::Format::Date("dd.mm.yyyy".into()));
+    click_field(&mut h, "due", 0);
+    h.event(egui::Event::Text("3.4.2025".into()));
+    h.run_steps(2);
+    h.get_by_label("April 2025");
+    h.get_by_label("15").click();
+    h.run_steps(4);
+    assert_eq!(value(&h, "due"), ["15.04.2025"], "picked in the field's pattern");
+}
+
 /// The value of `name` in a saved PDF, read back by opening it in a fresh app.
 fn saved_value(path: &std::path::Path, name: &str) -> Vec<String> {
     let mut app = PdfCraftApp::new();

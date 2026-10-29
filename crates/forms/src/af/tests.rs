@@ -284,6 +284,31 @@ fn dates_times_and_masks() {
     assert!(keystroke(&Format::Mask("AA-9999".into()), "Code", "a11234").is_err());
 }
 
+/// The dotted day-first pattern Field Properties offers (`dd.mm.yyyy`, #449), end to end: typed
+/// dates are read day first, shown in the pattern, the calendar's pick is written in it, and its
+/// scripts read back as the same format.
+#[test]
+fn dotted_day_first_dates_are_read_shown_and_written_back() {
+    let f = Format::Date("dd.mm.yyyy".into());
+    let ymd = |t: &str| parse_date(t, "dd.mm.yyyy").map(|d| (d.y, d.m, d.d));
+    // Day first, with any separators, a short day or month, or a two-digit year.
+    assert_eq!(ymd("29.10.2026"), Some((2026, 10, 29)));
+    assert_eq!(ymd("3.4.2025"), Some((2025, 4, 3)));
+    assert_eq!(ymd("03/04/25"), Some((2025, 4, 3)));
+    assert_eq!(keystroke(&f, "Datum", " 3.4.2025 "), Ok("3.4.2025".into()));
+    // The US order and impossible days are refused, not read another way.
+    assert!(keystroke(&f, "Datum", "04.15.2025").is_err(), "no month 15");
+    assert!(keystroke(&f, "Datum", "29.02.2026").is_err(), "2026 has no 29 February");
+    assert!(keystroke(&f, "Datum", "29.02.2024").is_ok());
+    assert_eq!(format_value(&f, "3.4.2025"), "03.04.2025");
+    let picked = format_date(DateTime { y: 2026, m: 10, d: 29, hh: 0, mm: 0, ss: 0 }, "dd.mm.yyyy");
+    assert_eq!(picked, "29.10.2026");
+    assert_eq!(ymd(&picked), Some((2026, 10, 29)), "the pick reads back as the day picked");
+    let (fj, kj) = format_js(&f).unwrap();
+    assert_eq!((fj.as_str(), kj.as_str()), ("AFDate_FormatEx(\"dd.mm.yyyy\");", "AFDate_KeystrokeEx(\"dd.mm.yyyy\");"));
+    assert_eq!(parse_format(&fj), Some(f));
+}
+
 #[test]
 fn validation_and_calculation() {
     let r = Validate::Range { min: Some(0.0), max: Some(100.0) };

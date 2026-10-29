@@ -133,7 +133,9 @@ pub(super) fn format_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme
             let presets: Vec<&str> = if matches!(cat, Category::Time) || picked == Category::Time {
                 TIME_PRESETS.to_vec()
             } else {
-                DATE_PRESETS.iter().copied().chain(["m/d/yyyy", "mm/dd/yyyy", "yyyy-mm-dd", "dd/mm/yyyy"]).collect()
+                // After Acrobat's presets: US, ISO and day-first patterns, the dotted one as
+                // German-speaking countries and much of Central and Eastern Europe write dates.
+                DATE_PRESETS.iter().copied().chain(["m/d/yyyy", "mm/dd/yyyy", "yyyy-mm-dd", "dd/mm/yyyy", "dd.mm.yyyy"]).collect()
             };
             ui.horizontal(|ui| {
                 ui.label(tl!("Format:"));
