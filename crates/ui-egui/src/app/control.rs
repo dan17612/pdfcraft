@@ -333,6 +333,14 @@ impl PdfCraftApp {
                     _ => return Err("secured-notice must be true or false".into()),
                 };
             }
+            // `--discord false`: no Discord button in the title bar and no community card on Home.
+            ("discord", _) => {
+                self.show_discord = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("discord must be true or false".into()),
+                };
+            }
             ("system-title-bar", _) => {
                 self.system_title_bar = match value {
                     "true" => true,

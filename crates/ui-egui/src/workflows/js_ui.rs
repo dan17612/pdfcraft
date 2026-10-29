@@ -430,6 +430,9 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
             app.side_panels.tools_side = crate::side_panels::ToolsSide::Right;
         }
     });
+    // The title bar's Discord button and the community card on Home; Help ▸ Join the ArtCraft
+    // Discord and the About dialog keep the links either way.
+    ui.add(widgets::checkbox(&mut app.show_discord, tl!("Show the Discord button and the community card")));
     ui.add_space(8.0);
     crate::appearance::preferences_section(ui, app, t);
     ui.add_space(8.0);

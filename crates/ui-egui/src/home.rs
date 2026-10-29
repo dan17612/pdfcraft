@@ -32,7 +32,8 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     .font(theme::regular(14.0)),
             );
             ui.add_space(14.0);
-            if !app.community_card_closed {
+            // Preferences can turn the card off for good, with the title bar's Discord button.
+            if app.show_discord && !app.community_card_closed {
                 egui::Frame::NONE
                     .fill(t.card)
                     .stroke(Stroke::new(1.0, t.border))

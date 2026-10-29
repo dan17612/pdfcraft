@@ -1,10 +1,17 @@
 //! Community links: the Discord button is one click away everywhere; Help menu, About dialog and
 //! home screen open the ArtCraft and PdfCraft pages.
 
+use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::links;
 use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
+
+/// A one-page PDF, for tests that need a document open.
+const ONE_PAGE: &[u8] = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
+
+/// The Preferences checkbox for the Discord button and the community card.
+const SHOW_DISCORD: &str = "Show the Discord button and the community card";
 
 fn harness(setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
@@ -55,12 +62,96 @@ fn home_community_card_closes_for_this_run() {
     assert!(!PdfCraftApp::new().community_card_closed);
 }
 
+/// Preferences (or `--discord false`) turns the title bar's Discord button and the community
+/// card off for good: both stay away after a restart, and Help ▸ Join the ArtCraft Discord
+/// still opens Discord. Settings from before the preference show both.
+#[test]
+fn the_discord_button_and_community_card_can_be_turned_off_for_good() {
+    let open = |settings: Option<String>| {
+        harness(move |app| {
+            if let Some(s) = &settings {
+                app.restore(s);
+            }
+        })
+    };
+    let mut h = open(None);
+    assert!(h.state().show_discord, "on by default");
+    h.get_by_label("Discord");
+    h.get_by_label("Join the ArtCraft community");
+    h.state_mut().set_option("dialog", "preferences").unwrap();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::CheckBox, SHOW_DISCORD).scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::CheckBox, SHOW_DISCORD).click();
+    h.run_steps(2);
+    assert!(!h.state().show_discord);
+    h.state_mut().dialog = None;
+    h.run_steps(2);
+    assert!(h.query_by_label("Discord").is_none(), "no Discord button in the title bar");
+    assert!(h.query_by_label("Join the ArtCraft community").is_none(), "no community card on Home");
+    assert!(h.query_by_label("Join our Discord").is_none());
+    // The Help menu keeps the link.
+    assert!(h.state_mut().execute("help.discord"));
+    assert_eq!(h.state().last_opened_url.as_deref(), Some(links::DISCORD));
+    // Kept in the settings: the next launch shows neither.
+    let saved = h.state().persist();
+    let mut h = open(Some(saved));
+    assert!(!h.state().show_discord);
+    assert!(h.query_by_label("Discord").is_none(), "remembered across a restart");
+    assert!(h.query_by_label("Join the ArtCraft community").is_none());
+    // Back on from Preferences.
+    h.state_mut().set_option("dialog", "preferences").unwrap();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::CheckBox, SHOW_DISCORD).scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::CheckBox, SHOW_DISCORD).click();
+    h.run_steps(2);
+    h.state_mut().dialog = None;
+    h.run_steps(2);
+    h.get_by_label("Discord");
+    h.get_by_label("Join the ArtCraft community");
+    // Settings saved before the preference existed, or with an unreadable value, keep both.
+    for old in ["{}", r#"{"show_discord": "no"}"#] {
+        let mut app = PdfCraftApp::new();
+        app.restore(old);
+        assert!(app.show_discord, "{old}");
+    }
+    // Scriptable (`--discord`, `ui.set`), with a clear refusal for anything else.
+    let app = h.state_mut();
+    app.set_option("discord", "false").unwrap();
+    assert!(!app.show_discord);
+    app.set_option("discord", "true").unwrap();
+    assert!(app.show_discord);
+    assert_eq!(app.set_option("discord", "maybe"), Err("discord must be true or false".into()));
+}
+
+/// Without the Discord button the document tabs take its room, and Open still stays in sight
+/// left of the icon buttons.
+#[test]
+fn without_the_discord_button_the_tabs_take_its_room() {
+    let open_right = |show_discord: bool| {
+        let h = harness(move |app| {
+            app.show_discord = show_discord;
+            for i in 0..20 {
+                app.open_bytes(&format!("document-{i:02}.pdf"), None, ONE_PAGE.to_vec()).unwrap();
+            }
+        });
+        assert_eq!(h.query_by_label("Discord").is_some(), show_discord);
+        let open = h.get_by_label("Open").rect();
+        let help = h.get_by_label("Keyboard shortcuts").rect();
+        assert!(open.left() > 0.0 && open.right() <= help.left(), "Open {open:?} stays in sight left of {help:?}");
+        open.right()
+    };
+    let with_button = open_right(true);
+    let without = open_right(false);
+    assert!(without > with_button + 40.0, "Open moves into the button's room: {with_button} to {without}");
+}
+
 #[test]
 fn about_dialog_shows_the_brand_and_links() {
-    let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
     // With a document open, so the home screen's own links are not on screen.
     let mut h = harness(move |app| {
-        app.open_bytes("one.pdf", None, pdf.to_vec()).unwrap();
+        app.open_bytes("one.pdf", None, ONE_PAGE.to_vec()).unwrap();
         app.dialog = Some(Dialog::About);
     });
     assert!(h.query_all_by_label("ArtCraft").count() >= 2, "the mark and the wordmark (alt text)");

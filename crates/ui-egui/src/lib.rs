@@ -343,6 +343,10 @@ pub struct PdfCraftApp {
     /// Preferences: tell the user, above the pages, that a document is secured (its security
     /// settings restrict changes). Off only hides that notice (#4035); kept in the settings.
     pub show_secured_notice: bool,
+    /// Preferences: show the title bar's Discord button and the community card on Home. Off
+    /// hides both for good; Help ▸ Join the ArtCraft Discord and the About dialog keep the
+    /// links. On by default; kept in the settings.
+    pub show_discord: bool,
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,
