@@ -1512,6 +1512,34 @@ fn formats_validation_and_calculations_run_like_acrobat() {
     assert_eq!(field(&fields(&doc), "Price").actions.format, Format::None);
 }
 
+/// Amounts on a German form (separator style 2, "1.234,56 €") and their sum: "1.200" is twelve
+/// hundred and "1,500" one and a half, and the sum adds those. Both used to be read the other way
+/// round, so the form showed 1,20 € and 1.500,00 € and summed them to 1.501,20 €.
+#[test]
+fn amounts_with_a_decimal_comma_are_read_in_their_style_and_summed() {
+    use crate::af::{CalcOp, Calculate, Format};
+    let mut doc = one_page();
+    let text = NewField::Text { multiline: false };
+    for (name, y) in [("Betrag1", 700.0), ("Betrag2", 660.0), ("Summe", 620.0)] {
+        add_field(&mut doc, 0, [50.0, y, 250.0, y + 20.0], &text, Some(name)).unwrap();
+    }
+    let euro = Format::Number { decimals: 2, sep: 2, neg: 0, currency: " €".into(), prepend: false };
+    for name in ["Betrag1", "Betrag2"] {
+        set_props(&mut doc, name, &FieldProps { format: Some(euro.clone()), ..FieldProps::default() }).unwrap();
+    }
+    let sum = Calculate::Simple { op: CalcOp::Sum, fields: vec!["Betrag1".into(), "Betrag2".into()] };
+    set_props(&mut doc, "Summe", &FieldProps { format: Some(euro), calculate: Some(sum), ..FieldProps::default() }).unwrap();
+    set_value(&mut doc, "Betrag1", &FieldValue::Text("1.200".into())).unwrap();
+    set_value(&mut doc, "Betrag2", &FieldValue::Text("1,500".into())).unwrap();
+    let all = fields(&doc);
+    assert_eq!(field(&all, "Betrag1").value, ["1200"]);
+    assert_eq!(field(&all, "Betrag2").value, ["1.5"]);
+    assert_eq!(field(&all, "Summe").value, ["1201.5"]);
+    assert!(ap(&doc, &field(&all, "Betrag1").widgets[0]).contains("(1.200,00 "));
+    assert!(ap(&doc, &field(&all, "Betrag2").widgets[0]).contains("(1,50 "));
+    assert!(ap(&doc, &field(&all, "Summe").widgets[0]).contains("(1.201,50 "));
+}
+
 /// A Calculate script that spells the notation's markers in a string, not in a comment, is kept
 /// as a script and runs: the form used to calculate the string's notation instead.
 #[test]

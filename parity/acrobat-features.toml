@@ -4583,8 +4583,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props", "form_fill"]
-evidence = ["crates/forms/src/af/tests.rs::numbers_format_like_acrobat", "crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat", "crates/automation/tests/it/automation.rs::form_formats_and_calculations_through_tools"]
-notes = "AFNumber_Format/Keystroke run natively: decimals, 5 separator styles, currency before/after, negative styles (red shown as minus/parentheses)"
+evidence = ["crates/forms/src/af/tests.rs::numbers_format_like_acrobat", "crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat", "crates/automation/tests/it/automation.rs::form_formats_and_calculations_through_tools", "crates/forms/src/af/tests.rs::a_decimal_comma_style_reads_numbers_in_that_style", "crates/forms/src/af/tests.rs::a_stored_number_keeps_its_meaning_in_a_decimal_comma_field", "crates/forms/src/tests.rs::amounts_with_a_decimal_comma_are_read_in_their_style_and_summed", "crates/automation/tests/it/automation.rs::amounts_with_a_decimal_comma_are_filled_in_their_style_through_tools", "crates/ui-egui/tests/it/forms.rs::an_amount_with_a_decimal_comma_is_typed_in_its_own_style"]
+notes = "AFNumber_Format/Keystroke run natively: decimals, 5 separator styles, currency before/after, negative styles (red shown as minus/parentheses). Typed text is read in the field's separator style: with a decimal comma (styles 2 and 3) 1.200 is twelve hundred and 1,500 one and a half, and the field editor shows amounts with their comma; numbers as stored and exported keep their meaning. Not yet: the keystroke filter while typing (any text can be typed and is checked on commit); currency text other than $ € £ ¥ typed with the amount is refused; a value another program stored in a style's own notation (1.200 meaning twelve hundred) is still shown and summed as 1.2"
 
 [[feature]]
 id = "form.af-percent"
@@ -4595,8 +4595,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props", "form_fill"]
-evidence = ["crates/forms/src/af/tests.rs::numbers_format_like_acrobat"]
-notes = "AFPercent_Format/Keystroke"
+evidence = ["crates/forms/src/af/tests.rs::numbers_format_like_acrobat", "crates/forms/src/af/tests.rs::a_decimal_comma_style_reads_numbers_in_that_style"]
+notes = "AFPercent_Format/Keystroke; typed text is read in the separator style, as for numbers (form.af-number)"
 
 [[feature]]
 id = "form.af-date-time"

@@ -25,20 +25,113 @@ pub const TIME_PRESETS: [&str; 4] = ["HH:MM", "h:MM tt", "HH:MM:ss", "h:MM:ss tt
 /// AFMakeNumber: a number from typed text (currency symbols, group separators, spaces and a
 /// trailing % ignored; a comma decimal separator accepted).
 pub fn make_number(s: &str) -> Option<f64> {
-    let t: String = s.trim().chars().filter(|c| !c.is_whitespace() && !matches!(c, '$' | '€' | '£' | '¥' | '\'' | '%')).collect();
-    if t.is_empty() {
-        return None;
-    }
-    let neg = t.starts_with('(') && t.ends_with(')');
-    let t = t.trim_start_matches('(').trim_end_matches(')');
+    let (neg, t) = bare_number(s)?;
     // "1.234,56" or "1234,56": comma is the decimal separator when it comes last.
     let normalized = match (t.rfind(','), t.rfind('.')) {
         (Some(c), Some(d)) if c > d => t.replace('.', "").replace(',', "."),
         (Some(c), None) if t.len() - c - 1 != 3 => t.replace(',', "."),
         _ => t.replace(',', ""),
     };
-    let v: f64 = normalized.parse().ok()?;
+    signed(&normalized, neg)
+}
+
+/// Typed text without what number entry ignores (spaces, the currency symbols $ € £ ¥, the
+/// apostrophes of separator style 4 and a % sign), and whether accounting parentheses around it
+/// make it negative. `None` when nothing is left.
+fn bare_number(s: &str) -> Option<(bool, String)> {
+    let t: String = s.trim().chars().filter(|c| !c.is_whitespace() && !matches!(c, '$' | '€' | '£' | '¥' | '\'' | '%')).collect();
+    if t.is_empty() {
+        return None;
+    }
+    let neg = t.starts_with('(') && t.ends_with(')');
+    Some((neg, t.trim_start_matches('(').trim_end_matches(')').to_string()))
+}
+
+/// `plain` read as a number when it is a finite one, negated for accounting parentheses.
+fn signed(plain: &str, neg: bool) -> Option<f64> {
+    let v: f64 = plain.parse().ok()?;
     v.is_finite().then_some(if neg { -v } else { v })
+}
+
+/// The number typed into a field whose separator style is `sep` (the sepStyle of
+/// AFNumber_Format and AFPercent_Format). Styles 2 ("1.234,56") and 3 ("1234,56") write the
+/// decimals after a comma, so there the comma is the decimal separator and periods separate
+/// thousands: those before the comma, or with no comma, periods that part the digits in threes.
+/// "1,500" is one and a half and "1.200" twelve hundred. Other text, such as "1234.5" or "0.125"
+/// whose period can't separate thousands, and the other styles' text are read by
+/// [`make_number`], as before.
+fn typed_number(s: &str, sep: u8) -> Option<f64> {
+    if !matches!(sep, 2 | 3) {
+        return make_number(s);
+    }
+    let (neg, t) = bare_number(s)?;
+    let (minus, digits) = match t.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, t.strip_prefix('+').unwrap_or(&t)),
+    };
+    let plain = match digits.split_once(',') {
+        Some((int, frac)) if int.bytes().all(|b| b.is_ascii_digit() || b == b'.') && frac.bytes().all(|b| b.is_ascii_digit()) => {
+            format!("{}.{frac}", int.replace('.', ""))
+        }
+        None if in_thousands(digits) => digits.replace('.', ""),
+        _ => return make_number(s),
+    };
+    signed(&plain, neg).map(|v| if minus { -v } else { v })
+}
+
+/// Whether `t` is digits parted by periods into thousands: one to three digits, not starting
+/// with 0, then groups of exactly three ("1.200", "12.345.678"; not "1234", "1.5" or "0.125").
+fn in_thousands(t: &str) -> bool {
+    let digits = |g: &str| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit());
+    let mut groups = t.split('.');
+    let first = groups.next().unwrap_or_default();
+    let mut rest = groups.peekable();
+    rest.peek().is_some() && digits(first) && first.len() <= 3 && !first.starts_with('0') && rest.all(|g| g.len() == 3 && digits(g))
+}
+
+/// `s` as a number when it is written exactly as [`js_number`] writes one, which is how a value
+/// is stored and exported and how scripts and tools pass numbers: "1.234" or "-0.5", not "1.200",
+/// "+5" or "1,5".
+fn js_number_text(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let v: f64 = s.parse().ok()?;
+    (v.is_finite() && js_number(v) == s).then_some(v)
+}
+
+/// The number in text committed to a number or percentage field: a number as JavaScript writes
+/// it keeps its meaning, so a stored or exported value that comes back is the same number; other
+/// text is read as typed in the field's separator style ([`typed_number`]).
+fn committed_number(s: &str, sep: u8) -> Option<f64> {
+    js_number_text(s).or_else(|| typed_number(s, sep))
+}
+
+/// The separator style of a number or percentage format that writes a decimal comma (2 or 3).
+fn comma_style(f: &Format) -> Option<u8> {
+    match f {
+        Format::Number { sep, .. } | Format::Percent { sep, .. } if matches!(*sep, 2 | 3) => Some(*sep),
+        _ => None,
+    }
+}
+
+/// The text a field's editor starts with for its value: a number stored in a field whose format
+/// writes a decimal comma shows with that comma ("1234,5"), as it is typed there, so that it
+/// reads back as the same number ([`typed_value`]). Any other value shows as it is.
+pub fn edit_text(f: &Format, value: &str) -> String {
+    match comma_style(f) {
+        Some(_) if js_number_text(value).is_some() => value.replacen('.', ",", 1),
+        _ => value.to_string(),
+    }
+}
+
+/// What to commit for text typed into a field's editor. In a field whose format writes a decimal
+/// comma, that is the number as typed in its style, written as JavaScript writes numbers: "1.234"
+/// typed there is one thousand two hundred and thirty-four ("1234"), not the stored number 1.234.
+/// Other text goes as typed, for [`keystroke`] to read or refuse.
+pub fn typed_value(f: &Format, text: &str) -> String {
+    match comma_style(f).and_then(|sep| typed_number(text, sep)) {
+        Some(v) => js_number(v),
+        None => text.to_string(),
+    }
 }
 
 /// A number as JavaScript prints it (integers without a fraction).
@@ -486,7 +579,7 @@ pub fn format_value(f: &Format, value: &str) -> String {
 }
 
 /// The Keystroke event on commit: does the value fit the format? Returns the value to store
-/// (numbers are normalised), or Acrobat's message.
+/// (numbers are normalised, and read in the format's separator style), or Acrobat's message.
 pub fn keystroke(f: &Format, field: &str, value: &str) -> Result<String, String> {
     let bad = || format!("The value entered does not match the format of the field [ {field} ]");
     // Blank input clears a formatted field; without a format, whitespace is text like any other.
@@ -495,11 +588,11 @@ pub fn keystroke(f: &Format, field: &str, value: &str) -> Result<String, String>
     }
     match f {
         Format::None => Ok(value.to_string()),
-        Format::Number { .. } => make_number(value).map(js_number).ok_or_else(bad),
-        Format::Percent { .. } => {
+        Format::Number { sep, .. } => committed_number(value, *sep).map(js_number).ok_or_else(bad),
+        Format::Percent { sep, .. } => {
             // Typed "12.5%" or "12.5" both mean 0.125 once stored? Acrobat stores the number
             // as typed and shows it ×100: keep the typed number.
-            make_number(value).map(js_number).ok_or_else(bad)
+            committed_number(value, *sep).map(js_number).ok_or_else(bad)
         }
         Format::Date(fmt) | Format::Time(fmt) => parse_date(value, fmt)
             .map(|_| value.trim().to_string())

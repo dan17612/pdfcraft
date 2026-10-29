@@ -69,6 +69,15 @@ let cells: Vec<table::Cell> = grid.cells_for(names)?;      // "Table1_1", "Table
   original entry is preserved. Positive limits still apply.
 - Values are validated (options, `MaxLen`, single vs multi-select, NoToggleToOff, read-only) and a
   failed call changes nothing.
+- Number and percentage fields (`AFNumber_Format`, `AFPercent_Format`) read text in their
+  separator style (`af::keystroke`). Styles 2 (`1.234,56`) and 3 (`1234,56`) write a decimal
+  comma, so there a comma is the decimal separator and periods separate thousands: `1.200` is
+  twelve hundred and `1,500` one and a half. A period that can't separate thousands (`1234.5`) is
+  still a decimal point, and a number as JavaScript writes it, as values are stored and
+  exported, keeps its meaning (`1.234` coming back from an export is 1.234). The app's field
+  editor shows a stored number with the style's comma and commits typing as the number it reads
+  (`af::edit_text`, `af::typed_value`), so `1.234` typed there is 1234. Styles 0, 1 and 4 read
+  text as before. Stored values are always written as JavaScript writes numbers (`1234.5`).
 - `FieldProps::appearance` applies a `LookPatch` independently to each widget. `None` keeps
   a property; `Some(None)` removes a border/fill colour. Unchanged `/DA`, custom font resources,
   widget-specific `/DA` overrides, indirect `/MK` and `/BS` contents, dash arrays and unknown

@@ -307,3 +307,116 @@ fn validation_and_calculation() {
     assert_eq!(calculate(&Calculate::Notation("(a + b) * 2 - Unit\\ Price / 4".into()), &vals), Some("10".into()));
     assert_eq!(calculate(&Calculate::Notation("a +".into()), &vals), None);
 }
+
+/// Separator styles 2 ("1.234,56") and 3 ("1234,56") write a decimal comma, and text committed
+/// to such a field is read in that style: the comma is the decimal separator and periods separate
+/// thousands. Every style used to read "1.200" as 1.2 and "1,500" as 1500, so a German form showed
+/// "1,20 €" and "1.500,00 €" for them, and it refused "1.234.567".
+#[test]
+fn a_decimal_comma_style_reads_numbers_in_that_style() {
+    let euro = |sep| Format::Number { decimals: 2, sep, neg: 0, currency: "€".into(), prepend: true };
+    for sep in [2, 3] {
+        for (typed, stored) in [
+            ("1.200", "1200"),
+            ("1,500", "1.5"),
+            ("-1.200", "-1200"),
+            ("(1.200)", "-1200"),
+            ("€ 1.200", "1200"),
+            ("1.234.567", "1234567"),
+            ("1.234,56", "1234.56"),
+            ("1234,5", "1234.5"),
+            ("1.200,00", "1200"),
+            ("1 200,5", "1200.5"),
+            (",5", "0.5"),
+            // A period that can't separate thousands is still a decimal point.
+            ("1234.5", "1234.5"),
+            ("1.5", "1.5"),
+            ("0.125", "0.125"),
+        ] {
+            assert_eq!(keystroke(&euro(sep), "Betrag", typed), Ok(stored.to_string()), "{typed:?} in style {sep}");
+        }
+        for refused in ["1,2,3", "1.234.5", "1,234,5", "--1,5", "1,5x", ",", "."] {
+            assert!(keystroke(&euro(sep), "Betrag", refused).is_err(), "{refused:?} in style {sep}");
+        }
+    }
+    let shown = |sep| format_value(&euro(sep), &keystroke(&euro(sep), "Betrag", "1.200").unwrap());
+    assert_eq!((shown(2), shown(3)), ("€1.200,00".to_string(), "€1200,00".to_string()));
+    let share = Format::Percent { decimals: 1, sep: 2 };
+    assert_eq!(keystroke(&share, "Anteil", "1,500"), Ok("1.5".to_string()));
+}
+
+/// The styles that write a decimal point (0 "1,234.56", 1 "1234.56", 4 "1'234.56") read text as
+/// before, taking a comma's meaning from where it stands.
+#[test]
+fn decimal_point_styles_read_numbers_as_before() {
+    for sep in [0, 1, 4] {
+        let dollars = Format::Number { decimals: 2, sep, neg: 0, currency: "$".into(), prepend: true };
+        for (typed, stored) in [
+            ("1.200", "1.2"),
+            ("1,500", "1500"),
+            ("$1,000", "1000"),
+            ("1,234.56", "1234.56"),
+            ("1.234,56", "1234.56"),
+            ("1234,5", "1234.5"),
+            ("1'234.5", "1234.5"),
+        ] {
+            assert_eq!(keystroke(&dollars, "Total", typed), Ok(stored.to_string()), "{typed:?} in style {sep}");
+        }
+    }
+}
+
+/// A number written as JavaScript writes it, as values are stored and exported and as tools and
+/// scripts pass them, keeps its meaning in a decimal-comma field: an exported 1.234 that comes
+/// back is 1.234, not 1234.
+#[test]
+fn a_stored_number_keeps_its_meaning_in_a_decimal_comma_field() {
+    let rate = Format::Number { decimals: 4, sep: 2, neg: 0, currency: String::new(), prepend: true };
+    for stored in ["1.234", "12.345", "-0.5", "0.125", "1234.5", "1200", "0.30000000000000004"] {
+        assert_eq!(keystroke(&rate, "Kurs", stored), Ok(stored.to_string()));
+    }
+    assert_eq!(format_value(&rate, "1.234"), "1,2340");
+}
+
+/// What the app's field editor shows and commits: a stored number with the field's decimal comma,
+/// and typed text read in the field's style, so "1.234" typed there is one thousand two hundred
+/// and thirty-four, though a stored "1.234" is 1.234. Other fields show and commit text as it is.
+#[test]
+fn the_field_editor_shows_and_commits_numbers_in_the_fields_style() {
+    let comma = Format::Number { decimals: 2, sep: 2, neg: 0, currency: String::new(), prepend: true };
+    let point = Format::Number { decimals: 2, sep: 0, neg: 0, currency: String::new(), prepend: true };
+    assert_eq!(edit_text(&comma, "1234.5"), "1234,5");
+    assert_eq!(edit_text(&comma, "1.234"), "1,234");
+    assert_eq!(edit_text(&comma, "-1200"), "-1200");
+    assert_eq!(edit_text(&comma, "1.200,00"), "1.200,00", "not a stored number: shown as it is");
+    assert_eq!(edit_text(&Format::Percent { decimals: 1, sep: 3 }, "0.125"), "0,125");
+    assert_eq!(edit_text(&point, "1234.5"), "1234.5");
+    assert_eq!(typed_value(&comma, "1.234"), "1234");
+    assert_eq!(typed_value(&comma, "1,234"), "1.234");
+    assert_eq!(typed_value(&comma, "1.234,50 €"), "1234.5");
+    assert_eq!(typed_value(&comma, "abc"), "abc", "left for the keystroke check to refuse");
+    assert_eq!(typed_value(&point, "1.234"), "1.234");
+    assert_eq!(typed_value(&Format::None, "1,5"), "1,5");
+}
+
+proptest::proptest! {
+    /// A stored number shown in a field's editor and committed unchanged is the same number, and
+    /// committing a stored value again changes nothing, whatever the separator style.
+    #[test]
+    fn stored_numbers_survive_the_field_editor(v in (proptest::num::f64::NORMAL | proptest::num::f64::ZERO), sep in 0u8..5) {
+        let f = Format::Number { decimals: 2, sep, neg: 0, currency: String::new(), prepend: true };
+        let stored = js_number(v);
+        proptest::prop_assert_eq!(keystroke(&f, "x", &typed_value(&f, &edit_text(&f, &stored))), Ok(stored.clone()));
+        proptest::prop_assert_eq!(keystroke(&f, "x", &stored), Ok(stored));
+    }
+
+    /// Whatever is typed into a number field is read or refused, never a panic, and the value it
+    /// stores reads back as itself.
+    #[test]
+    fn any_typed_number_is_read_or_refused(text in "[0-9.,' ()+$%€a-z-]{0,16}|\\PC{0,24}", sep in 0u8..6) {
+        let f = Format::Number { decimals: 2, sep, neg: 0, currency: String::new(), prepend: true };
+        let _ = edit_text(&f, &text);
+        if let Ok(stored) = keystroke(&f, "x", &typed_value(&f, &text)) {
+            proptest::prop_assert_eq!(keystroke(&f, "x", &stored), Ok(stored.clone()));
+        }
+    }
+}

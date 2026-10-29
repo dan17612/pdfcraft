@@ -101,13 +101,18 @@ fn editable_combo(f: &FormField) -> bool {
 }
 
 /// The text a field's editor starts with: its value, or for a combo box the shown text of the
-/// option it picks (a free value typed into an editable one has no option, and shows as is).
+/// option it picks (a free value typed into an editable one has no option, and shows as is). A
+/// number in a text field whose format writes a decimal comma shows with that comma, as it is
+/// typed there (`1234,5`).
 pub(crate) fn draft_text(f: &FormField) -> String {
     let value = f.value.first().cloned().unwrap_or_default();
     if f.kind == FormFieldKind::Combo
         && let Some((_, shown)) = f.options.iter().find(|(export, _)| *export == value)
     {
         return shown.clone();
+    }
+    if f.kind == FormFieldKind::Text {
+        return pdfcraft_engine::form_scripts::edit_text(&f.actions.format, &value);
     }
     value
 }
@@ -274,7 +279,16 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], allowed: b
 pub(crate) fn draft_edit(focus: &Focus, form: &[FormField]) -> Option<Edit> {
     let f = form.iter().find(|f| f.name == focus.name)?;
     let value = match f.kind {
-        FormFieldKind::Text if f.value.first().map(String::as_str).unwrap_or("") != focus.text => FieldValue::Text(focus.text.clone()),
+        // Typed into a text field: committed as its format reads typing, so "1.234" typed where
+        // the comma is the decimal separator is one thousand two hundred and thirty-four. Text
+        // that means the value the field has already is no edit.
+        FormFieldKind::Text if focus.text != draft_text(f) => {
+            let typed = pdfcraft_engine::form_scripts::typed_value(&f.actions.format, &focus.text);
+            if f.value.first() == Some(&typed) {
+                return None;
+            }
+            FieldValue::Text(typed)
+        }
         // Typed into an editable combo box: a shown text picks its option, anything else is the
         // value itself (the engine maps it, and refuses free text when Edit is clear).
         FormFieldKind::Combo if editable_combo(f) && focus.text != draft_text(f) && f.value.first() != Some(&focus.text) => {

@@ -4943,6 +4943,35 @@ fn form_formats_and_calculations_through_tools() {
     ));
 }
 
+/// Amounts with a decimal comma (separator 2, "1.234,56 €", as on German forms) take text in that
+/// style: "1.200" is twelve hundred and "1,500" one and a half. Both used to be read the other way
+/// round, so the sum showed 1.501,20 €. A number as form_fields returns it keeps its meaning.
+#[test]
+fn amounts_with_a_decimal_comma_are_filled_in_their_style_through_tools() {
+    let dir = workdir("decimal-comma");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    for (name, y) in [("Betrag1", 20), ("Betrag2", 60), ("Summe", 100)] {
+        ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "rect": [20, y, 180, y + 22], "name": name }));
+    }
+    let euro = json!({ "type": "number", "decimals": 2, "separator": 2, "currency": " €", "currency_after": true });
+    ok(&mut a, "form_set_props", json!({ "doc": doc, "fields": ["Betrag1", "Betrag2", "Summe"], "format": euro }));
+    ok(&mut a, "form_set_props", json!({ "doc": doc, "field": "Summe", "calculate": { "op": "sum", "fields": ["Betrag1", "Betrag2"] } }));
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Betrag1": "1.200", "Betrag2": "1,500" } }));
+    let f = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let field = |name: &str| f["fields"].as_array().unwrap().iter().find(|x| x["name"] == name).unwrap().clone();
+    let (first, second, sum) = (field("Betrag1"), field("Betrag2"), field("Summe"));
+    assert_eq!((first["value"].as_str(), first["display"].as_str()), (Some("1200"), Some("1.200,00 €")), "{first}");
+    assert_eq!((second["value"].as_str(), second["display"].as_str()), (Some("1.5"), Some("1,50 €")), "{second}");
+    assert_eq!((sum["value"].as_str(), sum["display"].as_str()), (Some("1201.5"), Some("1.201,50 €")), "{sum}");
+    assert!(page_text(&mut a, doc)[0].contains("1.201,50"));
+    // A value as form_fields returns it, or as an export writes it, is that number.
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Betrag2": "1.125" } }));
+    let f = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let second = f["fields"].as_array().unwrap().iter().find(|x| x["name"] == "Betrag2").unwrap().clone();
+    assert_eq!((second["value"].as_str(), second["display"].as_str()), (Some("1.125"), Some("1,13 €")), "{second}");
+}
+
 /// Renaming a field renames it in the formulas that read it: a sum dropped the field, notation
 /// read it as 0 and a script kept a stale value.
 #[test]

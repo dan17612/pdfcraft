@@ -192,6 +192,36 @@ fn typing_into_a_text_field_and_tabbing_on() {
     assert!(h.state().views[0].forms.focus.is_none());
 }
 
+/// Click `city`, replace what its editor holds with `text` and press Enter.
+fn type_into_city(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
+    click_field(h, "city", 0);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text(text.into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+}
+
+/// An amount field with a decimal comma (separator style 2, "1.234,56 €", as on German forms)
+/// reads typing in that style: "1.234" is one thousand two hundred and thirty-four. It was kept
+/// as 1.234 and shown as 1,23 €. The editor shows the amount with its comma, so committing what
+/// it shows keeps the amount.
+#[test]
+fn an_amount_with_a_decimal_comma_is_typed_in_its_own_style() {
+    let mut h = harness();
+    let euro = pdfcraft_engine::form_scripts::Format::Number { decimals: 2, sep: 2, neg: 0, currency: " €".into(), prepend: false };
+    set_city(&mut h, pdfcraft_engine::FieldProps { format: Some(euro), ..Default::default() });
+    type_into_city(&mut h, "1.234");
+    assert_eq!(value(&h, "city"), ["1234"], "the period separates thousands");
+    type_into_city(&mut h, "1.234,5");
+    assert_eq!(value(&h, "city"), ["1234.5"]);
+    click_field(&mut h, "city", 0);
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.text.as_str()), Some("1234,5"), "shown with the decimal comma");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "city"), ["1234.5"], "committing what the editor showed keeps the amount");
+}
+
 #[test]
 fn check_boxes_radios_and_choices() {
     let mut h = harness();
