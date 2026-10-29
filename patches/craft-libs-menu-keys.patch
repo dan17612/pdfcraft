@@ -1,0 +1,519 @@
+craft-keymap, craft-menu: the menu bar's shortcut column in the app's words
+
+UNCOMPILED. Written without cargo (not installed where it was written); a later session must run
+`cargo fmt --check`, `cargo clippy -p craft-keymap -p craft-menu --all-targets -- -D warnings`,
+`cargo clippy -p craft-keymap --all-targets --features ui -- -D warnings`,
+`cargo test -p craft-keymap --features ui` and `cargo test -p craft-menu` before anything is trusted.
+Note: no craft-libs workflow runs `cargo test -p craft-menu` (there is no menu.yml); run it by hand.
+
+Base: storytold/craft-libs main 1a11a4897865f7410c40d25ca6e452ce399a1a2c (crates/keymap and
+crates/menu are identical at e11f9d9, the rev PdfCraft pins, so it applies there too).
+Apply: git apply --check craft-libs-menu-keys.patch && git apply craft-libs-menu-keys.patch
+
+What it does
+- craft-keymap: `KeyWord` (Ctrl, Alt, Shift or the key) and `Chord::display_with(platform, &names)`
+  / `Trigger::display_with`: `display` with each word named by the app (German Strg+Umschalt+Entf);
+  `None` keeps the English word, Mac glyphs are never asked. `display` and `display_for` go
+  through the same code with no names, so their output is unchanged.
+- craft-keymap (feature `ui`): `I18nText::key_word`, the catalog's `key` rows that `Text::key`
+  already reads for the Keyboard Shortcuts dialog, so craft-i18n apps name keys the same way in
+  the dialog and in the menus. `Text::key` for `I18nText` now calls it (same lookup).
+- craft-menu: `MenuBarUi::key_names(&names)`; the bar writes the shortcut column (and the AccessKit
+  keyboard_shortcut, which is the same string) with `display_with`. Without the hook the column
+  is exactly as before (`english_key_names` returns None for every word).
+- Tests: keymap tests/chord.rs `display_with_names_the_words_and_keeps_the_glyphs`;
+  keymap ui/text.rs `key_words_come_from_the_catalogs_key_rows`; menu tests/bar.rs
+  `the_shortcut_column_takes_the_apps_key_names`. Revert check: change the bar back to
+  `c.display(self.platform)` (bar/mod.rs) and the bar test fails on "Ctrl+Shift+S" != "Strg+Umschalt+S".
+
+diff --git a/crates/keymap/README.md b/crates/keymap/README.md
+index 44a98c2..a84b1a9 100644
+--- a/crates/keymap/README.md
++++ b/crates/keymap/README.md
+@@ -78,6 +78,11 @@ macOS it folds into `cmd` (`Chord::effective`).
+   double press.
+ - `Chord::parse` also reads common aliases (`⇧⌘Z`, `opt+left`, `Ctrl+Cmd+M`).
+ - `Chord::display(Platform)` gives `⇧⌘Z` on macOS and `Ctrl+Shift+Z` elsewhere.
++  `Chord::display_with(Platform, &names)` gives the same text in the interface language: `names`
++  maps each `KeyWord` (`Ctrl`, `Alt`, `Shift` or the key) to the app's word, or `None` for the
++  English one, so German shows `Strg+Umschalt+Entf`. Mac glyphs (⌘, ⇧, ⌫, ↑) are never asked.
++  `ui::I18nText::key_word` reads the words from the catalog's `key` context, the rows the
++  Keyboard Shortcuts dialog names keys with.
+ - `chord::foreign::read_foreign` reads key text written by other applications (Windows or Mac
+   modifier names, numeric keypad keys).
+ 
+diff --git a/crates/keymap/src/chord.rs b/crates/keymap/src/chord.rs
+index df1ecb5..36408e4 100644
+--- a/crates/keymap/src/chord.rs
++++ b/crates/keymap/src/chord.rs
+@@ -332,6 +332,34 @@ impl Mods {
+     }
+ }
+ 
++/// A word of a chord's display text, for the app to name in the interface language
++/// ([`Chord::display_with`]): a modifier as Windows and Linux write it, or the key.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
++#[non_exhaustive]
++pub enum KeyWord {
++    /// The command modifier off macOS: `Ctrl` (`Strg` in German).
++    Ctrl,
++    /// `Alt`.
++    Alt,
++    /// `Shift` (`Umschalt` in German).
++    Shift,
++    /// The key: `Delete` (`Entf` in German), `Page Up`, `Space`, `F5`, `K`.
++    Key(Key),
++}
++
++impl KeyWord {
++    /// The word as [`Chord::display`] writes it: `Ctrl`, `Alt`, `Shift`, or the key's name as
++    /// Windows and Linux show it (`Delete`, `Page Up`, `K`).
++    pub fn english(self) -> &'static str {
++        match self {
++            KeyWord::Ctrl => "Ctrl",
++            KeyWord::Alt => "Alt",
++            KeyWord::Shift => "Shift",
++            KeyWord::Key(k) => k.text_name(),
++        }
++    }
++}
++
+ /// A key with modifiers.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+ pub struct Chord {
+@@ -505,17 +533,40 @@ impl Chord {
+ 
+     /// Text for menus and settings: `⌃⌥⇧⌘K` on macOS, `Ctrl+Alt+Shift+K` elsewhere.
+     pub fn display(&self, platform: Platform) -> String {
+-        self.display_key(platform, None)
++        self.display_key(platform, None, &|_| None)
++    }
++
++    /// [`display`](Self::display) in the app's words: `word` names each modifier and the key in
++    /// the interface language, and `None` keeps the English word. Glyphs read the same in every
++    /// language: on macOS only a key written as a word (`Space`, `Home`, `F5`, `K`) is asked, and
++    /// ⌃ ⌥ ⇧ ⌘, ⌦ and ↑ stay.
++    ///
++    /// ```
++    /// use craft_keymap::{Chord, Key, KeyWord, Platform};
++    ///
++    /// let german = |word: KeyWord| match word {
++    ///     KeyWord::Ctrl => Some("Strg".to_string()),
++    ///     KeyWord::Shift => Some("Umschalt".to_string()),
++    ///     KeyWord::Key(Key::Delete) => Some("Entf".to_string()),
++    ///     _ => None,
++    /// };
++    /// let chord = Chord::parse("Cmd+Shift+Delete").unwrap();
++    /// assert_eq!(chord.display_with(Platform::Windows, &german), "Strg+Umschalt+Entf");
++    /// assert_eq!(chord.display_with(Platform::Mac, &german), "⇧⌘⌦");
++    /// ```
++    pub fn display_with(&self, platform: Platform, word: &dyn Fn(KeyWord) -> Option<String>) -> String {
++        self.display_key(platform, None, word)
+     }
+ 
+     /// [`display`](Self::display) for the keys of `layout`: a punctuation key shows the character
+     /// the layout types at its position when that character has no key of its own (`Ctrl+Ü` for
+     /// Ctrl+[ on German). Letters and digits show as in `display`.
+     pub fn display_for(&self, platform: Platform, layout: &Layout) -> String {
+-        self.display_key(platform, layout.key_label(self.key).as_deref())
++        self.display_key(platform, layout.key_label(self.key).as_deref(), &|_| None)
+     }
+ 
+-    fn display_key(&self, platform: Platform, key_text: Option<&str>) -> String {
++    /// The display text, with the key written as `key_text` when given, and the app's `word`s.
++    fn display_key(&self, platform: Platform, key_text: Option<&str>, word: &dyn Fn(KeyWord) -> Option<String>) -> String {
+         let m = self.mods.effective(platform);
+         let mut s = String::new();
+         if platform.is_mac() {
+@@ -524,15 +575,18 @@ impl Chord {
+                     s.push_str(glyph);
+                 }
+             }
+-            s.push_str(key_text.unwrap_or(self.key.mac_symbol()));
+         } else {
+-            for (on, name) in [(m.cmd, "Ctrl+"), (m.alt, "Alt+"), (m.shift, "Shift+")] {
++            for (on, w) in [(m.cmd, KeyWord::Ctrl), (m.alt, KeyWord::Alt), (m.shift, KeyWord::Shift)] {
+                 if on {
+-                    s.push_str(name);
++                    s.push_str(word(w).as_deref().unwrap_or(w.english()));
++                    s.push('+');
+                 }
+             }
+-            s.push_str(key_text.unwrap_or(self.key.text_name()));
+         }
++        let shown = if platform.is_mac() { self.key.mac_symbol() } else { self.key.text_name() };
++        // A key shown as a glyph (⌦, ↑) is not a word: there is nothing to translate.
++        let named = if key_text.is_none() && shown == self.key.text_name() { word(KeyWord::Key(self.key)) } else { None };
++        s.push_str(key_text.or(named.as_deref()).unwrap_or(shown));
+         s
+     }
+ 
+@@ -641,6 +695,12 @@ impl Trigger {
+         if self.double { format!("{one} {one}") } else { one }
+     }
+ 
++    /// [`Chord::display_with`], twice with a space between for a double press.
++    pub fn display_with(&self, platform: Platform, word: &dyn Fn(KeyWord) -> Option<String>) -> String {
++        let one = self.chord.display_with(platform, word);
++        if self.double { format!("{one} {one}") } else { one }
++    }
++
+     /// [`Chord::display_for`], twice with a space between for a double press.
+     pub fn display_for(&self, platform: Platform, layout: &Layout) -> String {
+         let one = self.chord.display_for(platform, layout);
+diff --git a/crates/keymap/src/lib.rs b/crates/keymap/src/lib.rs
+index f121091..ba0af2e 100644
+--- a/crates/keymap/src/lib.rs
++++ b/crates/keymap/src/lib.rs
+@@ -3,7 +3,8 @@
+ //! Keyboard bindings for the Craft suite.
+ //!
+ //! [`chord`] holds the key and modifier types, the canonical text form that settings and control
+-//! protocols store, display text per platform, and a reader for other applications' key text.
++//! protocols store, display text per platform (in the app's words for keys and modifiers with
++//! [`Chord::display_with`]), and a reader for other applications' key text.
+ //! [`command`] names what a binding runs, [`scope`] where it works, and [`keymap`] holds an app's
+ //! catalog with default bindings, the user's [`Overrides`], dispatch ([`Keymap::lookup`]),
+ //! editing and conflicts. [`profiles`] keeps named sets of overrides; [`reserved`] lists the
+@@ -150,7 +151,7 @@ pub mod scope;
+ pub mod ui;
+ 
+ pub use chord::foreign::Flavor;
+-pub use chord::{Chord, Key, MAX_CHORD_TEXT, Mods, ParseError, Platform, Trigger};
++pub use chord::{Chord, Key, KeyWord, MAX_CHORD_TEXT, Mods, ParseError, Platform, Trigger};
+ pub use command::{CommandRef, MAX_KEY};
+ pub use editor::{DOUBLE_PRESS, EditSession, MAX_UNDO, MAX_UNDO_BYTES, Recorded, Recorder};
+ pub use import::{ContextRule, ForeignEntry, ForeignKey, ForeignSet, ImportOptions, ImportPlan, ImportReport, NoneDefined, Start, plan};
+diff --git a/crates/keymap/src/ui/text.rs b/crates/keymap/src/ui/text.rs
+index 12dd094..696bda3 100644
+--- a/crates/keymap/src/ui/text.rs
++++ b/crates/keymap/src/ui/text.rs
+@@ -3,7 +3,7 @@
+ 
+ use std::borrow::Cow;
+ 
+-use crate::chord::{Key, Platform, Trigger};
++use crate::chord::{Key, KeyWord, Platform, Trigger};
+ use crate::keymap::Bindable;
+ 
+ /// Where the dialog gets its words. Apps on craft-i18n pass [`I18nText`]; others implement the two
+@@ -47,6 +47,16 @@ pub struct I18nText<'a> {
+     pub lang: craft_i18n::Lang,
+ }
+ 
++impl I18nText<'_> {
++    /// A word of shortcut text from the catalog's `key` context (`Strg`, `Umschalt`, `Entf`), the
++    /// rows [`Text::key`] names the dialog's keys with: pass it to
++    /// [`Chord::display_with`](crate::Chord::display_with), or to a menu bar's shortcut column, so
++    /// that every shortcut the app shows uses the same names.
++    pub fn key_word(&self, word: KeyWord) -> Option<String> {
++        self.i18n.get(self.lang, "key", word.english()).map(str::to_string)
++    }
++}
++
+ impl Text for I18nText<'_> {
+     fn ui<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+         self.i18n.t(self.lang, source).into()
+@@ -69,7 +79,7 @@ impl Text for I18nText<'_> {
+         if p.is_mac() && k.mac_symbol() != k.text_name() {
+             return None;
+         }
+-        self.i18n.get(self.lang, "key", k.text_name()).map(str::to_string)
++        self.key_word(KeyWord::Key(k))
+     }
+ 
+     fn rtl(&self) -> bool {
+@@ -343,6 +353,25 @@ mod tests {
+         Ok(())
+     }
+ 
++    static DE: &craft_i18n::Embedded = &[("de", "key\tCtrl\tStrg\nkey\tShift\tUmschalt\nkey\tDelete\tEntf\n\tHome\tStartseite\n", "")];
++
++    /// A menu's shortcut text and the dialog's key caps read the same `key` rows; a plain row
++    /// (a command's or a page's name) is never a key's name.
++    #[test]
++    fn key_words_come_from_the_catalogs_key_rows() -> Result<(), crate::ParseError> {
++        let (i18n, _) = craft_i18n::I18n::new(DE, &["de"]);
++        let text = I18nText { i18n: &i18n, lang: i18n.from_code("de").expect("de is offered") };
++        let words = |w: KeyWord| text.key_word(w);
++        let chord = Chord::parse("Cmd+Shift+Delete")?;
++        assert_eq!(chord.display_with(Platform::Windows, &words), "Strg+Umschalt+Entf");
++        assert_eq!(chord.display_with(Platform::Mac, &words), "⇧⌘⌦");
++        assert_eq!(text.key_word(KeyWord::Alt), None, "no row: the English word");
++        assert_eq!(text.key_word(KeyWord::Key(Key::Home)), None, "the plain row is not a key's name");
++        assert_eq!(text.key(Key::Delete, Platform::Windows).as_deref(), Some("Entf"));
++        assert_eq!(text.key(Key::Delete, Platform::Mac), None, "⌦ is a glyph");
++        Ok(())
++    }
++
+     /// Every `ui("…")` and `plural(n, "…", "…")` literal in the dialog's sources is listed.
+     #[test]
+     fn every_looked_up_string_is_listed() {
+diff --git a/crates/keymap/tests/chord.rs b/crates/keymap/tests/chord.rs
+index 4a8440d..50ca42f 100644
+--- a/crates/keymap/tests/chord.rs
++++ b/crates/keymap/tests/chord.rs
+@@ -1,5 +1,5 @@
+ use craft_keymap::chord::foreign::{Flavor, ForeignError, ReadNote, read_foreign};
+-use craft_keymap::{Chord, Key, MAX_CHORD_TEXT, Mods, ParseError, Platform, Trigger};
++use craft_keymap::{Chord, Key, KeyWord, MAX_CHORD_TEXT, Mods, ParseError, Platform, Trigger};
+ 
+ fn chord(text: &str) -> Chord {
+     Chord::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"))
+@@ -136,6 +136,35 @@ fn display_follows_the_platform() {
+     assert_eq!(Trigger::parse("A A").unwrap().to_string(), "A A");
+ }
+ 
++#[test]
++fn display_with_names_the_words_and_keeps_the_glyphs() {
++    let german = |word: KeyWord| match word {
++        KeyWord::Ctrl => Some("Strg".to_owned()),
++        KeyWord::Shift => Some("Umschalt".to_owned()),
++        KeyWord::Key(Key::Delete) => Some("Entf".to_owned()),
++        KeyWord::Key(Key::Space) => Some("Leertaste".to_owned()),
++        _ => None,
++    };
++    assert_eq!(chord("Cmd+Shift+S").display_with(Platform::Windows, &german), "Strg+Umschalt+S");
++    assert_eq!(chord("Ctrl+Alt+Delete").display_with(Platform::Linux, &german), "Strg+Alt+Entf", "no name: the English word");
++    assert_eq!(chord("Ctrl+Tab").display_with(Platform::Windows, &german), "Strg+Tab");
++    assert_eq!(Trigger::parse("Delete Delete").unwrap().display_with(Platform::Windows, &german), "Entf Entf");
++    // macOS glyphs read the same in every language; a key written as a word is still named.
++    assert_eq!(chord("Cmd+Shift+Delete").display_with(Platform::Mac, &german), "⇧⌘⌦");
++    assert_eq!(chord("Ctrl+Space").display_with(Platform::Mac, &german), "⌃Leertaste");
++    assert_eq!(KeyWord::Ctrl.english(), "Ctrl");
++    assert_eq!(KeyWord::Key(Key::PageUp).english(), "Page Up", "the name display writes");
++    // With no names of the app's own, the text is display's, for every key and modifier set.
++    for &key in Key::ALL {
++        for bits in 0..16u8 {
++            let c = Chord::new(mods(bits & 1 != 0, bits & 2 != 0, bits & 4 != 0, bits & 8 != 0), key);
++            for p in [Platform::Mac, Platform::Windows, Platform::Linux] {
++                assert_eq!(c.display_with(p, &|_| None), c.display(p), "{c} on {p:?}");
++            }
++        }
++    }
++}
++
+ #[test]
+ fn ctrl_folds_into_cmd_off_macos() {
+     let ctrl = chord("Ctrl+S");
+diff --git a/crates/menu/README.md b/crates/menu/README.md
+index 063c2d0..7ed8b40 100644
+--- a/crates/menu/README.md
++++ b/crates/menu/README.md
+@@ -142,7 +142,11 @@ egui::Panel::top("menu-bar").show(ui, |ui| {
+   never run. Check items show ✓, the selected radio item a dot, and the shortcut column shows
+   every shortcut, the display-only ones too, in the target's names (⌘ glyphs on `Target::Mac`,
+   Ctrl names on Windows and Linux, the browser's system's names on the web; `.target(..)` to
+-  choose).
++  choose). The names are English; `.key_names(&names)` gives them in the interface language,
++  `names` mapping a `craft_keymap::KeyWord` (`Ctrl`, `Alt`, `Shift` or the key) to the app's word
++  or `None` for the English one: `Strg+Umschalt+S` and `Entf` in German. Mac glyphs are never
++  asked. Apps on craft-i18n pass `&|w| text.key_word(w)` (`craft_keymap::ui::I18nText`), the
++  same `key` rows the Keyboard Shortcuts dialog names keys with.
+ - **Narrow windows:** the menus that don't fit move into a trailing `⋯` menu; when not even the
+   first fits, one `Menu` title holds them all. `.label(&tr)` translates `⋯`, `Menu` and the
+   scroll arrows' names, with the same hook as `LayoutOptions::label`. The bar fills its row;
+diff --git a/crates/menu/src/bar/mod.rs b/crates/menu/src/bar/mod.rs
+index d034b9a..1e9f1fe 100644
+--- a/crates/menu/src/bar/mod.rs
++++ b/crates/menu/src/bar/mod.rs
+@@ -12,7 +12,7 @@
+ pub(crate) mod keys;
+ pub(crate) mod nav;
+ 
+-use craft_keymap::{CommandRef, Platform};
++use craft_keymap::{CommandRef, KeyWord, Platform};
+ use egui::accesskit::{HasPopup, Role, Toggled};
+ use egui::containers::menu::{MenuConfig, MenuState, SubMenu, SubMenuButton};
+ use egui::text::LayoutJob;
+@@ -38,6 +38,9 @@ pub enum Labeled<'s> {
+ /// The app's English labels ([`MenuBarUi::english`]).
+ type EnglishHook<'h> = dyn Fn(Labeled<'_>) -> Option<String> + 'h;
+ 
++/// The app's names for the shortcut column's words ([`MenuBarUi::key_names`]).
++type KeyNamesHook<'h> = dyn Fn(KeyWord) -> Option<String> + 'h;
++
+ /// How the bar looks. [`BarStyle::from_style`] takes its defaults from an egui style.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct BarStyle {
+@@ -96,6 +99,11 @@ fn english(label: &'static str) -> String {
+     label.to_owned()
+ }
+ 
++/// No names of the app's own: the shortcut column keeps craft-keymap's English words.
++fn english_key_names(_: KeyWord) -> Option<String> {
++    None
++}
++
+ /// The bar for one frame: `MenuBarUi::new(&bar).gate(gate).show(ui)` returns the commands
+ /// chosen. Draw it at the top of the window, in a top panel.
+ pub struct MenuBarUi<'a> {
+@@ -105,6 +113,7 @@ pub struct MenuBarUi<'a> {
+     style: Option<BarStyle>,
+     label: &'a dyn Fn(&'static str) -> String,
+     english: Option<&'a EnglishHook<'a>>,
++    key_names: &'a KeyNamesHook<'a>,
+     preferred: &'a [(&'a str, char)],
+     id: Id,
+     fit: Option<f32>,
+@@ -120,6 +129,7 @@ impl<'a> MenuBarUi<'a> {
+             style: None,
+             label: &english,
+             english: None,
++            key_names: &english_key_names,
+             preferred: &[],
+             id: Id::unique("craft-menu-bar"),
+             fit: None,
+@@ -155,6 +165,16 @@ impl<'a> MenuBarUi<'a> {
+         self
+     }
+ 
++    /// The app's names for the words of the shortcut column, shown and read out
++    /// ([`craft_keymap::Chord::display_with`]): `Strg+Umschalt+S` and `Entf` in German. `None`
++    /// keeps a word's English name, as without this hook. Mac glyphs are never asked. Apps on
++    /// craft-i18n can pass the catalog's `key` rows, as the Keyboard Shortcuts dialog names keys
++    /// (`craft_keymap::ui::I18nText::key_word`).
++    pub fn key_names(mut self, names: &'a dyn Fn(KeyWord) -> Option<String>) -> MenuBarUi<'a> {
++        self.key_names = names;
++        self
++    }
++
+     /// The English label of a row or title, for labels the keyboard can't type a letter of
+     /// (Chinese, Japanese, Korean…): such a label shows its English label's mnemonic after it,
+     /// "文件(F)", before a trailing ellipsis ("開く(O)…"), as Windows menus do. Without this hook (or when it returns `None`) such a label
+@@ -214,6 +234,7 @@ impl<'a> MenuBarUi<'a> {
+             platform,
+             style: &style,
+             label: self.label,
++            key_names: self.key_names,
+             mnemonics,
+             english: self.english,
+             preferred: self.preferred,
+@@ -425,6 +446,7 @@ struct Draw<'s> {
+     platform: Platform,
+     style: &'s BarStyle,
+     label: &'s dyn Fn(&'static str) -> String,
++    key_names: &'s KeyNamesHook<'s>,
+     /// The target has mnemonics (not a Mac).
+     mnemonics: bool,
+     english: Option<&'s EnglishHook<'s>>,
+@@ -526,7 +548,7 @@ impl Draw<'_> {
+             ItemKind::Check(on) => (Role::MenuItemCheckBox, on.then_some(self.style.check_mark.as_str())),
+             ItemKind::Radio(on) => (Role::MenuItemRadio, on.then_some(self.style.radio_mark.as_str())),
+         };
+-        let shortcut = it.shortcut.map(|c| c.display(self.platform));
++        let shortcut = it.shortcut.map(|c| c.display_with(self.platform, self.key_names));
+         let underline = mnemonic.filter(|_| nav.underline);
+         let mut button = egui::Button::new(marks.text(ui, mark, label, underline));
+         if let Some(s) = &shortcut {
+diff --git a/crates/menu/src/lib.rs b/crates/menu/src/lib.rs
+index 6e46250..cf35fb9 100644
+--- a/crates/menu/src/lib.rs
++++ b/crates/menu/src/lib.rs
+@@ -45,7 +45,8 @@
+ //!   ([`LayoutOptions::extra_shortcuts`]).
+ //!
+ //! The labels the layout writes itself are English unless the app passes its translations in
+-//! [`LayoutOptions::label`].
++//! [`LayoutOptions::label`], and so are the key names in the egui bar's shortcut column
++//! (`Ctrl+Shift+S`) unless it passes its own ([`MenuBarUi::key_names`]).
+ //!
+ //! **Keys stay with egui.** AppKit runs a menu's key equivalents before the window sees the key,
+ //! which would skip the app's own key rules (a focused text field keeps ⌘C, ⌘V and ⌘Z, dialogs
+diff --git a/crates/menu/src/tests/bar.rs b/crates/menu/src/tests/bar.rs
+index 5227839..3d268a0 100644
+--- a/crates/menu/src/tests/bar.rs
++++ b/crates/menu/src/tests/bar.rs
+@@ -1,5 +1,6 @@
+ //! The egui bar: clicks, hover, the keys, overflow, scrolling, submenu hover intent and AccessKit.
+ 
++use craft_keymap::KeyWord;
+ use egui::accesskit::{self, NodeId, Role, Toggled};
+ use egui::{Event, Id, Key, Modifiers, Pos2, Rect, Vec2, pos2, vec2};
+ 
+@@ -57,6 +58,7 @@ struct Bar {
+     gate: Gate,
+     target: Target,
+     english: Option<fn(Labeled<'_>) -> Option<String>>,
++    key_names: Option<fn(KeyWord) -> Option<String>>,
+     preferred: Vec<(&'static str, char)>,
+     size: Vec2,
+     dt: f64,
+@@ -85,6 +87,7 @@ impl Bar {
+             gate: Gate::default(),
+             target: Target::Linux,
+             english: None,
++            key_names: None,
+             preferred: Vec::new(),
+             size,
+             dt: 1.0 / 60.0,
+@@ -110,7 +113,8 @@ impl Bar {
+             events: std::mem::take(&mut self.events),
+             ..Default::default()
+         };
+-        let (bar, gate, target, english, preferred, fit) = (&self.bar, self.gate, self.target, self.english, &self.preferred, self.fit);
++        let (bar, gate, target, english, key_names, preferred, fit) =
++            (&self.bar, self.gate, self.target, self.english, self.key_names, &self.preferred, self.fit);
+         let mut out = Vec::new();
+         let mut after = None;
+         let mut full = self.ctx.run_ui(raw, |ui| {
+@@ -118,6 +122,9 @@ impl Bar {
+             if let Some(english) = &english {
+                 ui_bar = ui_bar.english(english);
+             }
++            if let Some(names) = &key_names {
++                ui_bar = ui_bar.key_names(names);
++            }
+             match fit {
+                 Some(max) => {
+                     ui.horizontal(|ui| {
+@@ -468,6 +475,49 @@ fn the_web_shows_the_browsers_system_names_and_the_mac_its_glyphs() {
+     }
+ }
+ 
++/// The shortcut column in the app's words (`key_names`), shown and read out alike: German
++/// `Strg+Umschalt+S` and `Entf`. Words without a name of the app's stay English, the Mac glyphs
++/// stay, and without the hook the column is as before.
++#[test]
++fn the_shortcut_column_takes_the_apps_key_names() {
++    use egui::os::OperatingSystem as Os;
++    fn german(word: KeyWord) -> Option<String> {
++        let name = match word {
++            KeyWord::Ctrl => "Strg",
++            KeyWord::Shift => "Umschalt",
++            KeyWord::Key(craft_keymap::Key::Delete) => "Entf",
++            _ => return None,
++        };
++        Some(name.to_owned())
++    }
++    fn shortcuts() -> MenuBar {
++        let rows = [
++            ("file.save_as", "Save As…", "Cmd+Shift+S"),
++            ("edit.delete", "Delete", "Delete"),
++            ("view.next_tab", "Next Tab", "Ctrl+Tab"),
++            ("view.tools", "Tools Panel", "Shift+F4"),
++        ];
++        let items: Vec<Node> = rows.into_iter().map(|(id, label, keys)| item(id, label).shortcut(chord(keys)).into()).collect();
++        MenuBar { menus: vec![Menu::new("Edit", items).role(MenuRole::Edit)], documents: Vec::new() }
++    }
++    let de: Option<fn(KeyWord) -> Option<String>> = Some(german);
++    for (target, os, names, shown) in [
++        (Target::Linux, Os::Nix, de, ["Strg+Umschalt+S", "Entf", "Strg+Tab", "Umschalt+F4"]),
++        (Target::Web, Os::Windows, de, ["Strg+Umschalt+S", "Entf", "Strg+Tab", "Umschalt+F4"]),
++        (Target::Web, Os::Mac, de, ["⇧⌘S", "⌦", "⌃⇥", "⇧F4"]),
++        (Target::Linux, Os::Nix, None, ["Ctrl+Shift+S", "Delete", "Ctrl+Tab", "Shift+F4"]),
++    ] {
++        let mut b = Bar::new(shortcuts(), vec2(800.0, 600.0));
++        b.ctx.set_os(os);
++        b.target = target;
++        b.key_names = names;
++        b.click("Edit");
++        for (label, text) in ["Save As…", "Delete", "Next Tab", "Tools Panel"].into_iter().zip(shown) {
++            assert_eq!(b.node(label).and_then(|n| n.keyboard_shortcut()), Some(text), "{label}: {target:?} on {os:?}");
++        }
++    }
++}
++
+ /// `shrink_to_fit` leaves the rest of the row to other controls; past its limit the menus
+ /// overflow into "⋯".
+ #[test]
