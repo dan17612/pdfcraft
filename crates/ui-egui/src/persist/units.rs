@@ -52,8 +52,9 @@ impl Unit {
     }
 
     /// The unit the system's region measures in: inches in the United States, Liberia and
-    /// Myanmar, millimetres everywhere else; inches when the region can't be told. Used on first
-    /// start, before the user picks one in Preferences.
+    /// Myanmar, millimetres everywhere else; inches when the region can't be told. On the web the
+    /// browser's preferred locale stands in for the region (a page can't read the system's). Used
+    /// on first start, before the user picks one in Preferences.
     pub fn system() -> Unit {
         static SYSTEM: std::sync::OnceLock<Unit> = std::sync::OnceLock::new();
         *SYSTEM.get_or_init(|| detect().unwrap_or_default())
@@ -74,6 +75,23 @@ pub(crate) fn unit_for_tag(tag: &str) -> Option<Unit> {
     Some(match region.to_ascii_uppercase().as_str() {
         "US" | "LR" | "MM" => Unit::Inches,
         _ => Unit::Millimetres,
+    })
+}
+
+/// The unit for the browser's preferred locales, most preferred first (`navigator.languages`,
+/// then `navigator.language`). Only the first tag decides: a later one is a fallback language,
+/// not the user's region. A tag with a region goes through [`unit_for_tag`]; a bare language
+/// (Firefox's German default list starts with `de`) takes its most likely region, which measures
+/// in inches only for `en` (United States) and `my` (Myanmar). `None` without any tag.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn unit_for_browser_tags<S: AsRef<str>>(tags: impl IntoIterator<Item = S>) -> Option<Unit> {
+    let first = tags.into_iter().take(32).find_map(|tag| {
+        let tag = tag.as_ref().trim();
+        (!tag.is_empty()).then(|| tag.to_owned())
+    })?;
+    unit_for_tag(&first).or_else(|| {
+        let language = first.split(['-', '_']).next().unwrap_or_default().to_ascii_lowercase();
+        Some(if matches!(language.as_str(), "en" | "my") { Unit::Inches } else { Unit::Millimetres })
     })
 }
 
@@ -130,14 +148,36 @@ fn windows_measure() -> Option<String> {
     }
 }
 
+/// The browser's preferred locales, read the way the interface language reads them
+/// (`i18n::detect_system_lang`): `navigator.languages` in order, then `navigator.language`.
 #[cfg(target_arch = "wasm32")]
 fn detect() -> Option<Unit> {
-    None
+    let navigator = web_sys::window()?.navigator();
+    let mut tags: Vec<String> = navigator.languages().iter().take(31).filter_map(|v| v.as_string()).collect();
+    tags.extend(navigator.language());
+    unit_for_browser_tags(&tags)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Unit, unit_for_imeasure, unit_for_tag};
+    use super::{Unit, unit_for_browser_tags, unit_for_imeasure, unit_for_tag};
+
+    /// The web build's first-start unit (#432 on the web): the browser's first locale decides.
+    #[test]
+    fn the_browsers_first_locale_decides_the_unit() {
+        assert_eq!(unit_for_browser_tags(["de-DE", "de"]), Some(Unit::Millimetres));
+        // A bare language first (Firefox's German default); a later US English fallback doesn't make it inches.
+        assert_eq!(unit_for_browser_tags(["de", "en-US", "en"]), Some(Unit::Millimetres));
+        assert_eq!(unit_for_browser_tags(["en-US", "en"]), Some(Unit::Inches));
+        assert_eq!(unit_for_browser_tags(["en-GB", "en"]), Some(Unit::Millimetres));
+        assert_eq!(unit_for_browser_tags(["en"]), Some(Unit::Inches));
+        assert_eq!(unit_for_browser_tags(["my"]), Some(Unit::Inches));
+        // A numeric region (Latin America) is no country: the language's likely region decides.
+        assert_eq!(unit_for_browser_tags(["es-419"]), Some(Unit::Millimetres));
+        assert_eq!(unit_for_browser_tags(["", "  fr-CA "]), Some(Unit::Millimetres));
+        assert_eq!(unit_for_browser_tags(Vec::<String>::new()), None);
+        assert_eq!(unit_for_browser_tags(["", " "]), None);
+    }
 
     #[test]
     fn region_decides_the_unit() {

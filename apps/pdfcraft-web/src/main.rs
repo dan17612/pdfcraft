@@ -23,6 +23,9 @@ fn main() {
                 options,
                 Box::new(|cc| {
                     let mut app = PdfCraftApp::new();
+                    // First start (or settings from before Units existed): the unit of the
+                    // browser's locale, as the desktop app takes the system region's (#432).
+                    app.units = pdfcraft_ui_egui::units::Unit::system();
                     // "printcraft": settings saved under the app's former name, PrintCraft.
                     if let Some(json) = cc.storage.and_then(|s| s.get_string("pdfcraft").or_else(|| s.get_string("printcraft"))) {
                         app.restore(&json);
