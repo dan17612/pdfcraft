@@ -1,0 +1,70 @@
+--- a/crates/forms/src/af/format.rs
++++ b/crates/forms/src/af/format.rs
+@@ -117,10 +117,8 @@
+ /// writes a decimal comma shows with that comma ("1234,5"), as it is typed there, so that it
+ /// reads back as the same number ([`typed_value`]). Any other value shows as it is.
+ pub fn edit_text(f: &Format, value: &str) -> String {
+-    match comma_style(f) {
+-        Some(_) if js_number_text(value).is_some() => value.replacen('.', ",", 1),
+-        _ => value.to_string(),
+-    }
++    let _ = (f, comma_style, js_number_text);
++    value.to_string()
+ }
+ 
+ /// What to commit for text typed into a field's editor. In a field whose format writes a decimal
+@@ -128,10 +126,8 @@
+ /// typed there is one thousand two hundred and thirty-four ("1234"), not the stored number 1.234.
+ /// Other text goes as typed, for [`keystroke`] to read or refuse.
+ pub fn typed_value(f: &Format, text: &str) -> String {
+-    match comma_style(f).and_then(|sep| typed_number(text, sep)) {
+-        Some(v) => js_number(v),
+-        None => text.to_string(),
+-    }
++    let _ = (f, committed_number, typed_number);
++    text.to_string()
+ }
+ 
+ /// A number as JavaScript prints it (integers without a fraction).
+@@ -588,11 +584,11 @@
+     }
+     match f {
+         Format::None => Ok(value.to_string()),
+-        Format::Number { sep, .. } => committed_number(value, *sep).map(js_number).ok_or_else(bad),
+-        Format::Percent { sep, .. } => {
++        Format::Number { .. } => make_number(value).map(js_number).ok_or_else(bad),
++        Format::Percent { .. } => {
+             // Typed "12.5%" or "12.5" both mean 0.125 once stored? Acrobat stores the number
+             // as typed and shows it ×100: keep the typed number.
+-            committed_number(value, *sep).map(js_number).ok_or_else(bad)
++            make_number(value).map(js_number).ok_or_else(bad)
+         }
+         Format::Date(fmt) | Format::Time(fmt) => parse_date(value, fmt)
+             .map(|_| value.trim().to_string())
+--- a/crates/ui-egui/src/tools/forms_ui.rs
++++ b/crates/ui-egui/src/tools/forms_ui.rs
+@@ -110,9 +110,6 @@
+         && let Some((_, shown)) = f.options.iter().find(|(export, _)| *export == value)
+     {
+         return shown.clone();
+-    }
+-    if f.kind == FormFieldKind::Text {
+-        return pdfcraft_engine::form_scripts::edit_text(&f.actions.format, &value);
+     }
+     value
+ }
+@@ -282,13 +279,7 @@
+         // Typed into a text field: committed as its format reads typing, so "1.234" typed where
+         // the comma is the decimal separator is one thousand two hundred and thirty-four. Text
+         // that means the value the field has already is no edit.
+-        FormFieldKind::Text if focus.text != draft_text(f) => {
+-            let typed = pdfcraft_engine::form_scripts::typed_value(&f.actions.format, &focus.text);
+-            if f.value.first() == Some(&typed) {
+-                return None;
+-            }
+-            FieldValue::Text(typed)
+-        }
++        FormFieldKind::Text if f.value.first().map(String::as_str).unwrap_or("") != focus.text => FieldValue::Text(focus.text.clone()),
+         // Typed into an editable combo box: a shown text picks its option, anything else is the
+         // value itself (the engine maps it, and refuses free text when Edit is clear).
+         FormFieldKind::Combo if editable_combo(f) && focus.text != draft_text(f) && f.value.first() != Some(&focus.text) => {

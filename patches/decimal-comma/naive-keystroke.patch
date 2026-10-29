@@ -1,0 +1,12 @@
+--- a/crates/forms/src/af/format.rs
++++ b/crates/forms/src/af/format.rs
+@@ -102,7 +102,8 @@
+ /// it keeps its meaning, so a stored or exported value that comes back is the same number; other
+ /// text is read as typed in the field's separator style ([`typed_number`]).
+ fn committed_number(s: &str, sep: u8) -> Option<f64> {
+-    js_number_text(s).or_else(|| typed_number(s, sep))
++    let _ = js_number_text;
++    typed_number(s, sep)
+ }
+ 
+ /// The separator style of a number or percentage format that writes a decimal comma (2 or 3).
