@@ -1,0 +1,91 @@
+diff --git a/crates/forms/src/af/tests.rs b/crates/forms/src/af/tests.rs
+index ff25e069..d31d31a0 100644
+--- a/crates/forms/src/af/tests.rs
++++ b/crates/forms/src/af/tests.rs
+@@ -284,6 +284,31 @@ fn dates_times_and_masks() {
+     assert!(keystroke(&Format::Mask("AA-9999".into()), "Code", "a11234").is_err());
+ }
+ 
++/// The dotted day-first pattern Field Properties offers (`dd.mm.yyyy`, #449), end to end: typed
++/// dates are read day first, shown in the pattern, the calendar's pick is written in it, and its
++/// scripts read back as the same format.
++#[test]
++fn dotted_day_first_dates_are_read_shown_and_written_back() {
++    let f = Format::Date("dd.mm.yyyy".into());
++    let ymd = |t: &str| parse_date(t, "dd.mm.yyyy").map(|d| (d.y, d.m, d.d));
++    // Day first, with any separators, a short day or month, or a two-digit year.
++    assert_eq!(ymd("29.10.2026"), Some((2026, 10, 29)));
++    assert_eq!(ymd("3.4.2025"), Some((2025, 4, 3)));
++    assert_eq!(ymd("03/04/25"), Some((2025, 4, 3)));
++    assert_eq!(keystroke(&f, "Datum", " 3.4.2025 "), Ok("3.4.2025".into()));
++    // The US order and impossible days are refused, not read another way.
++    assert!(keystroke(&f, "Datum", "04.15.2025").is_err(), "no month 15");
++    assert!(keystroke(&f, "Datum", "29.02.2026").is_err(), "2026 has no 29 February");
++    assert!(keystroke(&f, "Datum", "29.02.2024").is_ok());
++    assert_eq!(format_value(&f, "3.4.2025"), "03.04.2025");
++    let picked = format_date(DateTime { y: 2026, m: 10, d: 29, hh: 0, mm: 0, ss: 0 }, "dd.mm.yyyy");
++    assert_eq!(picked, "29.10.2026");
++    assert_eq!(ymd(&picked), Some((2026, 10, 29)), "the pick reads back as the day picked");
++    let (fj, kj) = format_js(&f).unwrap();
++    assert_eq!((fj.as_str(), kj.as_str()), ("AFDate_FormatEx(\"dd.mm.yyyy\");", "AFDate_KeystrokeEx(\"dd.mm.yyyy\");"));
++    assert_eq!(parse_format(&fj), Some(f));
++}
++
+ #[test]
+ fn validation_and_calculation() {
+     let r = Validate::Range { min: Some(0.0), max: Some(100.0) };
+diff --git a/crates/ui-egui/tests/it/forms.rs b/crates/ui-egui/tests/it/forms.rs
+index fa828a8f..bf7f6d0a 100644
+--- a/crates/ui-egui/tests/it/forms.rs
++++ b/crates/ui-egui/tests/it/forms.rs
+@@ -589,6 +589,50 @@ fn lithuanian_calendar_localizes_months_and_weekdays_without_changing_field_valu
+     assert_eq!(value(&h, "due"), vec![format!("{nm:02}/15/{ny}")], "the PDF field keeps its own date format");
+ }
+ 
++/// #449: Field Properties ▸ Format ▸ Date offered no dotted day-first pattern, so `dd.mm.yyyy`
++/// had to be typed in as a custom one. Picked from the list, the field reads a date typed day
++/// first, its calendar follows it, and the day picked is written in the pattern.
++#[test]
++fn a_date_field_takes_the_dotted_day_first_preset() {
++    use egui::accesskit::Role;
++    use egui_kittest::kittest::Queryable;
++    let mut h = harness();
++    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
++        page: 0,
++        rect: [50.0, 40.0, 200.0, 60.0],
++        kind: pdfcraft_engine::NewField::Date,
++        name: Some("due".into()),
++    });
++    h.run_steps(4);
++    h.state_mut().open_field_props("due", 0);
++    h.run_steps(2);
++    h.get_by_label("Format").click();
++    h.run_steps(2);
++    h.get_by(|n| n.role() == Role::ComboBox && n.value().as_deref() == Some("mm/dd/yyyy")).click();
++    h.run_steps(2);
++    // The last of the list: brought into view in case the list scrolls.
++    h.get_by_label("dd.mm.yyyy").scroll_to_me();
++    h.run_steps(2);
++    h.get_by_label("dd.mm.yyyy").click();
++    h.run_steps(2);
++    // The example (10/1/2026 typed) is read day first, as the field will read it.
++    h.get_by_label("Example: 10.01.2026");
++    h.get_by_label("OK").click();
++    h.run_steps(3);
++    let format = {
++        let s = h.state();
++        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "due").unwrap().actions.format.clone()
++    };
++    assert_eq!(format, pdfcraft_engine::form_scripts::Format::Date("dd.mm.yyyy".into()));
++    click_field(&mut h, "due", 0);
++    h.event(egui::Event::Text("3.4.2025".into()));
++    h.run_steps(2);
++    h.get_by_label("April 2025");
++    h.get_by_label("15").click();
++    h.run_steps(4);
++    assert_eq!(value(&h, "due"), ["15.04.2025"], "picked in the field's pattern");
++}
++
+ /// The value of `name` in a saved PDF, read back by opening it in a fresh app.
+ fn saved_value(path: &std::path::Path, name: &str) -> Vec<String> {
+     let mut app = PdfCraftApp::new();
