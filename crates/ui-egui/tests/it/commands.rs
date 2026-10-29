@@ -6,7 +6,7 @@ use crate::support;
 use egui::os::OperatingSystem;
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_engine::commands::COMMANDS;
 use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
 
@@ -443,6 +443,37 @@ fn localized_shortcuts_update_immediately_and_keep_command_ids_and_key_bindings(
     assert!(!h.state().palette_open);
     let doc = h.state().session.get(h.state().views[0].id).unwrap();
     assert!(!doc.dirty);
+}
+
+/// The shortcut an open menu's row shows, as AccessKit reads it out.
+fn menu_shortcut(h: &Harness<'static, PdfCraftApp>, label: &str) -> String {
+    support::menu_row(h, label).accesskit_node().data().keyboard_shortcut().unwrap_or_default().to_owned()
+}
+
+/// The menu bar writes its shortcuts in the interface language like the rest of the app (#496):
+/// since the menus came from craft-menu (#4752) the German bar showed `Ctrl+O`, `Ctrl+Shift+S`
+/// and `Delete` while the tooltips, the palette and Help ▸ Keyboard shortcuts said `Strg`.
+#[test]
+fn the_menu_bar_writes_shortcuts_in_the_interface_language() {
+    let mut h = harness();
+    h.ctx.set_os(OperatingSystem::Windows);
+    h.state_mut().set_option("language", "de").unwrap();
+    h.run_steps(2);
+    // A macOS build's in-window bar writes ⌘ glyphs, the same in every language.
+    let mac = cfg!(target_os = "macos");
+    support::open_menu(&mut h, "Datei");
+    assert_eq!(menu_shortcut(&h, "Öffnen…"), if mac { "⌘O" } else { "Strg+O" });
+    assert_eq!(menu_shortcut(&h, "Speichern unter…"), if mac { "⇧⌘S" } else { "Strg+Umschalt+S" });
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    support::open_menu(&mut h, "Bearbeiten");
+    assert_eq!(menu_shortcut(&h, "Löschen"), if mac { "⌦" } else { "Entf" }, "the Delete key's name, not the command's");
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    h.state_mut().set_option("language", "en").unwrap();
+    h.run_steps(2);
+    support::open_menu(&mut h, "File");
+    assert_eq!(menu_shortcut(&h, "Save as…"), if mac { "⇧⌘S" } else { "Ctrl+Shift+S" }, "English reads as before");
 }
 
 /// View ▸ Zoom open in the menu bar, with egui told the app runs on `os`.

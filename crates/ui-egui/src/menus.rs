@@ -7,7 +7,7 @@
 //! keys, the recent files and the open documents. [`PdfCraftApp::run_menu_command`] runs every
 //! one of them, once per click, whichever bar it came from.
 
-use craft_keymap::{Key, Mods};
+use craft_keymap::{Key, KeyWord, Mods};
 use craft_menu::{
     Builtin, Chord, CommandRef, Document, Gate, Item, ItemRole, ItemState, Labeled, LayoutOptions, Menu, MenuBar, MenuRole, Node, Target,
 };
@@ -260,7 +260,21 @@ fn translate(english: &'static str) -> String {
     if english == "\u{22ef}" {
         return "...".to_owned();
     }
+    // The layouts write About, Hide and Quit as `About {app}`; the catalogs translate them with
+    // the name in ("About PdfCraft"), the label Help ▸ About had before the layouts named it.
+    if english.contains("{app}") {
+        let named = english.replace("{app}", APP_NAME);
+        if crate::i18n::has(crate::i18n::current(), &named) {
+            return tl!(&named).to_owned();
+        }
+    }
     tl!(english).to_owned()
+}
+
+/// The shortcut column's words in the interface language (`Strg+Umschalt+S`, `Entf`): the `key`
+/// rows every other shortcut the app shows is written with ([`crate::commands::shortcut_label`]).
+fn key_word(word: KeyWord) -> Option<String> {
+    Some(crate::i18n::key_name(word.english()).to_owned())
 }
 
 /// The layouts' own labels (About, Quit, Window…) through the app's translations.
@@ -577,6 +591,7 @@ impl PdfCraftApp {
         let chosen = craft_menu::MenuBarUi::new(&bar)
             .gate(gate)
             .label(&translate)
+            .key_names(&key_word)
             .english(&english)
             .id(egui::Id::unique("pdfcraft-menu-bar"))
             .shrink_to_fit(fit)
@@ -688,6 +703,30 @@ mod tests {
                 "{id} runs something"
             );
         }
+    }
+
+    /// The label the layouts write for About and the shortcut column's words follow the interface
+    /// language, as the menus did before craft-menu (#496): German "Über PdfCraft", `Strg`,
+    /// `Umschalt` and the Delete key's `Entf`. English reads as before.
+    #[test]
+    fn the_layouts_about_label_and_the_key_words_follow_the_interface_language() {
+        let (app, ctx) = app(&["a.pdf"]);
+        let previous = crate::i18n::current();
+        let about = |app: &PdfCraftApp| item(&linux(app, &ctx), &CommandRef::new("help.about")).label.clone();
+        let save_as = chord(Shortcut::cmd_shift("S")).expect("craft-keymap names S");
+        let delete = chord(Shortcut { command: false, shift: false, mac_ctrl: false, key: "Delete" }).expect("craft-keymap names Delete");
+        let de = crate::i18n::Lang::from_code("de").expect("German is bundled");
+        crate::i18n::set_current(de);
+        assert_eq!(about(&app), crate::i18n::tr(de, "About PdfCraft"));
+        assert_ne!(about(&app), "About PdfCraft", "the catalog's row, not the English");
+        assert_eq!(save_as.display_with(craft_keymap::Platform::Windows, &key_word), "Strg+Umschalt+S");
+        assert_eq!(delete.display_with(craft_keymap::Platform::Linux, &key_word), "Entf", "the key's name, not the command's");
+        assert_eq!(save_as.display_with(craft_keymap::Platform::Mac, &key_word), "⇧⌘S");
+        crate::i18n::set_current(crate::i18n::Lang::EN);
+        assert_eq!(about(&app), "About PdfCraft");
+        assert_eq!(save_as.display_with(craft_keymap::Platform::Windows, &key_word), "Ctrl+Shift+S");
+        assert_eq!(delete.display_with(craft_keymap::Platform::Linux, &key_word), "Delete");
+        crate::i18n::set_current(previous);
     }
 
     #[test]
