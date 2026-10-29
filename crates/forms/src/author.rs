@@ -33,8 +33,12 @@ pub enum NewField {
     Text {
         multiline: bool,
     },
-    /// A date field: a text field with Acrobat's date format action (`AFDate_FormatEx`).
-    Date,
+    /// A date field: a text field with Acrobat's date format and keystroke actions
+    /// (`AFDate_FormatEx`, `AFDate_KeystrokeEx`) for `format`, a pattern in Acrobat's date
+    /// letters. Acrobat's own is [`crate::af::DEFAULT_DATE_FIELD_FORMAT`].
+    Date {
+        format: String,
+    },
     CheckBox,
     /// One radio button in `group` (a new group is created when none of that name exists),
     /// selected by `export`.
@@ -62,7 +66,7 @@ impl NewField {
     fn base_name(&self) -> &'static str {
         match self {
             NewField::Text { .. } => "Text",
-            NewField::Date => "Date",
+            NewField::Date { .. } => "Date",
             NewField::CheckBox => "Check Box",
             NewField::Radio { .. } => "Group",
             NewField::Combo { .. } => "Dropdown",

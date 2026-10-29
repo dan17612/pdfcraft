@@ -6,6 +6,10 @@
 //!
 //! Patterns use `util.printd`'s date letters: `yyyy` `yy`, `mmmm` `mmm` `mm` `m`, `dddd` `ddd`
 //! `dd` `d`. `\` shows the next character as is (`d \de mmmm` → `8 de October`).
+//!
+//! New date form fields take the pattern too when a field can show it ([`date_field_format`]).
+
+use pdfcraft_forms::af::DEFAULT_DATE_FIELD_FORMAT;
 
 use crate::Session;
 
@@ -633,6 +637,24 @@ pub fn check_date_format(fmt: &str) -> Result<&str, String> {
     Ok(fmt)
 }
 
+/// The pattern a new date form field takes (Prepare a form, `form_add_field`) for the
+/// Preferences ▸ Date format pattern `fmt`: `fmt` itself when it has only numeric date codes
+/// (`yyyy` `yy` `mm` `m` `dd` `d`) and ASCII separators (`dd.mm.yyyy`, `yyyy-mm-dd`, `d/m/yy`),
+/// which a field shows as Fill & Sign does and reads back. Otherwise Acrobat's `mm/dd/yyyy`
+/// ([`DEFAULT_DATE_FIELD_FORMAT`]): for the default [`DEFAULT_DATE_FORMAT`] (no preference), an
+/// unusable pattern, month and weekday names (a field writes them in English, whatever the date
+/// language), `\` escapes (`AFDate_FormatEx` has none), and other letters or non-ASCII text.
+pub fn date_field_format(fmt: &str) -> &str {
+    let Ok(fmt) = check_date_format(fmt) else { return DEFAULT_DATE_FIELD_FORMAT };
+    let numeric = runs(fmt).into_iter().all(|(c, n, escaped)| match c {
+        _ if escaped => false,
+        'y' => true,
+        'm' | 'd' => n <= 2,
+        _ => c == ' ' || c.is_ascii_punctuation(),
+    });
+    if numeric && fmt != DEFAULT_DATE_FORMAT { fmt } else { DEFAULT_DATE_FIELD_FORMAT }
+}
+
 /// `fmt` as runs of the same character with whether it's escaped: `dd.\mm` → (`d`, 2, no),
 /// (`.`, 1, no), (`m`, 1, yes), (`m`, 1, no). Escaped characters are never grouped.
 fn runs(fmt: &str) -> Vec<(char, usize, bool)> {
@@ -1014,5 +1036,39 @@ mod tests {
         assert!(e.contains("火曜日") && e.contains("can't be written into the PDF yet"), "{e}");
         assert!(s.today_text_for_pdf(Some("dd.mm.yyyy"), Some("ja")).is_ok(), "numbers are fine in any language");
         assert!(s.today_text_for_pdf(Some("yyyy\\年mm\\月"), Some("ja")).unwrap_err().contains("年月"));
+    }
+
+    /// #158: a new date form field takes the date format when a field can show it as Fill & Sign
+    /// does (numbers and ASCII separators), and Acrobat's mm/dd/yyyy otherwise.
+    #[test]
+    fn date_fields_take_a_numeric_date_format_or_acrobats() {
+        use crate::form_scripts::{DateTime, format_date, parse_date};
+        for (fmt, field) in [
+            ("m/d/yyyy", "mm/dd/yyyy"),
+            ("dd.mm.yyyy", "dd.mm.yyyy"),
+            ("d/m/yyyy", "d/m/yyyy"),
+            (" yyyy-mm-dd ", "yyyy-mm-dd"),
+            ("yyyy.mm.dd.", "yyyy.mm.dd."),
+            ("dd/mm/yy", "dd/mm/yy"),
+            ("d mmmm yyyy", "mm/dd/yyyy"),
+            ("dddd, mmmm d, yyyy", "mm/dd/yyyy"),
+            ("dd\\.mm\\.yyyy", "mm/dd/yyyy"),
+            ("d \\de mmmm", "mm/dd/yyyy"),
+            ("dd.mm.yyyy T", "mm/dd/yyyy"),
+            ("yyyy年m月d日", "mm/dd/yyyy"),
+            ("dd.mm.yyyy HH", "mm/dd/yyyy"),
+            ("", "mm/dd/yyyy"),
+        ] {
+            assert_eq!(date_field_format(fmt), field, "{fmt:?}");
+        }
+        // A preset a field takes is written as Fill & Sign writes it, and read back as that day.
+        for fmt in DATE_FORMATS {
+            let field = date_field_format(fmt);
+            let shown = format_date(DateTime { y: 2026, m: 3, d: 7, hh: 0, mm: 0, ss: 0 }, field);
+            assert_eq!(parse_date(&shown, field).map(|d| (d.y, d.m, d.d)), Some((2026, 3, 7)), "{fmt} → {field}: {shown}");
+            if field == fmt {
+                assert_eq!(shown, format_day(fmt, DAY, EN), "{fmt}");
+            }
+        }
     }
 }

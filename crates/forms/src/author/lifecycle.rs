@@ -66,10 +66,18 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
                 w.set(b"Ff".to_vec(), Object::Int(flags::MULTILINE as i64));
             }
         }
-        NewField::Date => {
+        NewField::Date { format } => {
+            // A pattern with no date in it would refuse every value typed into the field.
+            if !format.contains(['y', 'm', 'd']) {
+                return invalid(format!("the date format {format:?} has no year (y), month (m) or day (d)"));
+            }
+            // Acrobat's format and keystroke actions for the pattern (run by its JavaScript
+            // engine), written as the Format tab writes them: non-ASCII escaped.
+            let Some((on_format, on_keystroke)) = crate::af::format_js(&crate::af::Format::Date(format.clone())) else {
+                return invalid("a date field needs format scripts");
+            };
             w.set(b"FT".to_vec(), Object::name("Tx"));
             w.set(b"DA".to_vec(), PdfString::literal(b"/Helv 0 Tf 0 g".to_vec()));
-            // Acrobat's format and keystroke actions for mm/dd/yyyy (run by its JavaScript engine).
             let js = |s: &str| {
                 let mut a = Dict::new();
                 a.set(b"S".to_vec(), Object::name("JavaScript"));
@@ -77,8 +85,8 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
                 Object::Dict(a)
             };
             let mut aa = Dict::new();
-            aa.set(b"F".to_vec(), js("AFDate_FormatEx(\"mm/dd/yyyy\");"));
-            aa.set(b"K".to_vec(), js("AFDate_KeystrokeEx(\"mm/dd/yyyy\");"));
+            aa.set(b"F".to_vec(), js(&on_format));
+            aa.set(b"K".to_vec(), js(&on_keystroke));
             w.set(b"AA".to_vec(), Object::Dict(aa));
         }
         NewField::CheckBox => {

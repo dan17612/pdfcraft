@@ -4930,9 +4930,9 @@ tier = "P0"
 milestone = "M6"
 status = "shipped"
 commands = ["form.add.date"]
-tools = ["form_add_field"]
-evidence = ["crates/forms/src/tests.rs::every_field_type_can_be_added_named_and_drawn"]
-notes = "text field with AFDate_FormatEx(\"mm/dd/yyyy\") format/keystroke actions"
+tools = ["form_add_field", "fill_sign_date_format"]
+evidence = ["crates/forms/src/tests.rs::every_field_type_can_be_added_named_and_drawn", "crates/forms/src/tests.rs::a_new_date_field_takes_the_format_it_is_given", "crates/engine/src/dates.rs::date_fields_take_a_numeric_date_format_or_acrobats", "crates/automation/tests/it/automation.rs::new_date_fields_follow_a_numeric_date_format_preference_through_tools", "crates/ui-egui/tests/it/forms.rs::new_date_fields_take_a_numeric_date_format_preference"]
+notes = "text field with AFDate_FormatEx/AFDate_KeystrokeEx format/keystroke actions in Preferences ▸ Date format when that has only numeric date codes and ASCII separators (dd.mm.yyyy, yyyy-mm-dd, d/m/yyyy), else Acrobat's mm/dd/yyyy (the default m/d/yyyy, month or weekday names, which a field writes in English, and \\ escapes). Missing: no default from the system or interface locale while the preference is unset; not compared with what a localized Acrobat gives a new date field"
 
 [[feature]]
 id = "form.add-signature-field"

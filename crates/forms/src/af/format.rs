@@ -20,6 +20,9 @@ pub const DATE_PRESETS: [&str; 14] = [
 
 pub const TIME_PRESETS: [&str; 4] = ["HH:MM", "h:MM tt", "HH:MM:ss", "h:MM:ss tt"];
 
+/// The pattern of a new date field when no other is asked for: Acrobat's own.
+pub const DEFAULT_DATE_FIELD_FORMAT: &str = "mm/dd/yyyy";
+
 // ── running them ────────────────────────────────────────────────────────────────────────────
 
 /// AFMakeNumber: a number from typed text (currency symbols, group separators, spaces and a

@@ -200,6 +200,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-29 (M6, #158 partial):** A new date form field takes Preferences ▸ Date format when that has only numeric date codes and ASCII separators (`dd.mm.yyyy`, `yyyy-mm-dd`), placed with the Date field tool or through `form_add_field`. Other patterns, and no preference, keep Acrobat's `mm/dd/yyyy`. `NewField::Date` now carries its pattern. Estimates unchanged.
 - **2026-10-29 (M6, #449 and #158 partial):** Field Properties ▸ Format ▸ Date offers the dotted day-first `dd.mm.yyyy` after `dd/mm/yyyy`. Typing, the calendar and the field's scripts already handled the pattern; a kittest and a forms unit test now pin it. Estimates unchanged.
 - **2026-10-27 (M10, OCR models):** Model staging downloads and verifies the ONNX pair after the upstream RTEN URL brownout; runtime discovery prefers complete ONNX pairs per directory, retains complete RTEN fallback and preserves directory precedence.
 - **2026-10-24 (M10, #4158 partial):** Word, HTML, RTF and PowerPoint export keep a block that continues another on its line (an italic case name, a link, a superscript) as a run in its own style inside that paragraph, with the source's word space, instead of a paragraph of its own. Style changes that wrap onto the next line still split paragraphs (the reading blocks keep style boundaries). Estimates unchanged.

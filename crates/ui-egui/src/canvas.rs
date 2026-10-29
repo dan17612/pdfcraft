@@ -834,6 +834,8 @@ struct PageEnv<'a> {
     content_h: f32,
     content_w: f32,
     custom_stamp: &'a Option<crate::stamps_ui::CustomStamp>,
+    /// The pattern a new date field takes (Prepare a form).
+    date_field_format: &'a str,
     date_text: &'a Result<String, String>,
     doc: &'a pdfcraft_engine::Document,
     doc_links: &'a Vec<pdfcraft_engine::LinkItem>,
@@ -1098,6 +1100,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         can_modify,
         comments_hidden,
         custom_stamp,
+        date_field_format,
         date_text,
         doc,
         doc_links,
@@ -1221,7 +1224,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         };
         // While a table is being set up, nothing else is drawn or moved.
         let allowed = can_modify && table_preview.is_none() && frame.out.open_table.is_none();
-        let o = crate::prepare::page_input(cx, form, field_tool, allowed, view);
+        let o = crate::prepare::page_input(cx, form, field_tool, allowed, view, date_field_format);
         frame.out.field_props |= o.properties;
         frame.out.field_placed |= o.placed;
         frame.out.open_table = frame.out.open_table.or(o.table);
@@ -2949,6 +2952,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let initials = app.initials.clone();
     let author = app.comment_prefs.author.clone();
     let today = app.session.today();
+    // What a new date field takes: Preferences ▸ Date format when a field can show it.
+    let date_field_format = pdfcraft_engine::dates::date_field_format(app.session.date_format()).to_owned();
     // In Preferences ▸ Date format, or why it can't be stamped into the PDF.
     let date_text = crate::date_text_for_pdf(&app.session);
     let by_line = app.session.stamp_by_line(&author);
@@ -2995,6 +3000,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         content_h,
         content_w,
         custom_stamp: &custom_stamp,
+        date_field_format: &date_field_format,
         date_text: &date_text,
         doc,
         doc_links: &doc_links,

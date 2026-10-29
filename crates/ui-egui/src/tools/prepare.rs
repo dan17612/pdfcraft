@@ -93,8 +93,9 @@ impl FieldTool {
     }
 
     /// The field a click or drag creates. Radio buttons dropped next to a selected radio group
-    /// join it with the next free choice.
-    pub fn new_field(self, join: Option<&FormField>) -> NewField {
+    /// join it with the next free choice; a date field takes `date_format` (Preferences ▸ Date
+    /// format when a field can show it, see `pdfcraft_engine::dates::date_field_format`).
+    pub fn new_field(self, join: Option<&FormField>, date_format: &str) -> NewField {
         match self {
             // A table's cells are text fields.
             FieldTool::Text | FieldTool::TextTable => NewField::Text { multiline: false },
@@ -112,7 +113,7 @@ impl FieldTool {
             FieldTool::List => NewField::List { options: Vec::new(), multi: false },
             FieldTool::Button => NewField::Button { caption: String::new() },
             FieldTool::Image => NewField::Image,
-            FieldTool::Date => NewField::Date,
+            FieldTool::Date => NewField::Date { format: date_format.to_owned() },
             FieldTool::Signature => NewField::Signature,
         }
     }
@@ -252,8 +253,15 @@ pub(crate) struct Outcome {
     pub table: Option<(usize, [f64; 4])>,
 }
 
-/// Pointer input on one page while preparing a form.
-pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Option<FieldTool>, allowed: bool, view: &mut DocView) -> Outcome {
+/// Pointer input on one page while preparing a form. A date field placed takes `date_format`.
+pub(crate) fn page_input(
+    cx: PageToolContext<'_>,
+    form: &[FormField],
+    tool: Option<FieldTool>,
+    allowed: bool,
+    view: &mut DocView,
+    date_format: &str,
+) -> Outcome {
     let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
     let mut out = Outcome { consumed: false, properties: false, placed: false, table: None };
     let pointer = ptr.pos;
@@ -316,7 +324,7 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Opti
                     };
                     let join = prep.selected.as_ref().and_then(|(n, _)| form.iter().find(|f| &f.name == n));
                     prep.select_added = Some(form.len());
-                    view.pending_edit = Some(Edit::AddField { page, rect, kind: tool.new_field(join), name: None });
+                    view.pending_edit = Some(Edit::AddField { page, rect, kind: tool.new_field(join, date_format), name: None });
                     out.placed = true;
                 }
                 Grab::Move | Grab::Corner(..) => {
@@ -358,7 +366,8 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Opti
                 let (w, h) = tool.default_size();
                 let join = prep.selected.as_ref().and_then(|(n, _)| form.iter().find(|f| &f.name == n));
                 prep.select_added = Some(form.len());
-                view.pending_edit = Some(Edit::AddField { page, rect: [at[0], at[1] - h, at[0] + w, at[1]], kind: tool.new_field(join), name: None });
+                let kind = tool.new_field(join, date_format);
+                view.pending_edit = Some(Edit::AddField { page, rect: [at[0], at[1] - h, at[0] + w, at[1]], kind, name: None });
                 out.placed = true;
             }
         }

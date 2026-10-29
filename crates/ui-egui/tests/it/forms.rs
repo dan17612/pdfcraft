@@ -433,7 +433,7 @@ fn date_fields_offer_a_calendar() {
     h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
         page: 0,
         rect: [50.0, 40.0, 200.0, 60.0],
-        kind: pdfcraft_engine::NewField::Date,
+        kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
         name: Some("due".into()),
     });
     h.run_steps(4);
@@ -459,7 +459,7 @@ fn the_calendar_follows_a_complete_date_typed_while_it_is_open() {
     h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
         page: 0,
         rect: [50.0, 40.0, 200.0, 60.0],
-        kind: pdfcraft_engine::NewField::Date,
+        kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
         name: Some("due".into()),
     });
     h.run_steps(4);
@@ -492,7 +492,7 @@ fn an_undelimited_date_field_takes_a_typed_date_and_its_calendar_opens_on_it() {
     h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
         page: 0,
         rect: [50.0, 40.0, 200.0, 60.0],
-        kind: pdfcraft_engine::NewField::Date,
+        kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
         name: Some("due".into()),
     });
     assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
@@ -526,7 +526,12 @@ fn the_calendar_picks_today_in_the_fields_format_from_any_month() {
     s.session = std::mem::take(&mut s.session).with_clock(|| 1_700_000_000);
     assert_eq!(h.state().session.today(), (2023, 11, 14));
     for (name, rect) in [("due", [50.0, 40.0, 200.0, 60.0]), ("start", [50.0, 80.0, 200.0, 100.0])] {
-        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField { page: 0, rect, kind: pdfcraft_engine::NewField::Date, name: Some(name.into()) });
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+            page: 0,
+            rect,
+            kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
+            name: Some(name.into()),
+        });
     }
     assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
         name: "start".into(),
@@ -569,7 +574,7 @@ fn lithuanian_calendar_localizes_months_and_weekdays_without_changing_field_valu
     h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
         page: 0,
         rect: [50.0, 40.0, 200.0, 60.0],
-        kind: pdfcraft_engine::NewField::Date,
+        kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
         name: Some("due".into()),
     });
     h.run_steps(4);
@@ -600,7 +605,7 @@ fn a_date_field_takes_the_dotted_day_first_preset() {
     h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
         page: 0,
         rect: [50.0, 40.0, 200.0, 60.0],
-        kind: pdfcraft_engine::NewField::Date,
+        kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
         name: Some("due".into()),
     });
     h.run_steps(4);
@@ -631,6 +636,40 @@ fn a_date_field_takes_the_dotted_day_first_preset() {
     h.get_by_label("15").click();
     h.run_steps(4);
     assert_eq!(value(&h, "due"), ["15.04.2025"], "picked in the field's pattern");
+}
+
+/// #158: a new date field was mm/dd/yyyy whatever Preferences ▸ Date format said. Placed with the
+/// Date field tool it takes the preference when that writes the date in numbers only.
+#[test]
+fn new_date_fields_take_a_numeric_date_format_preference() {
+    use pdfcraft_engine::form_scripts::Format;
+    let mut h = harness();
+    // A click with the Date field tool `y` points from the top of the page, in its empty lower part.
+    let place = |h: &mut Harness<'static, PdfCraftApp>, y: f32| -> String {
+        assert!(h.state_mut().execute("form.add.date"));
+        // The tool opens the Prepare a form panel, which moves the page: let it settle first.
+        h.run_steps(8);
+        let p = {
+            let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+            r.min + egui::vec2(40.0, y) * (r.width() / 300.0)
+        };
+        click_at(h, p);
+        h.run_steps(2);
+        h.state().views[0].prepare.selected.clone().expect("the placed field is selected").0
+    };
+    let pattern = |h: &Harness<'static, PdfCraftApp>, name: &str| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == name).unwrap().actions.format.clone()
+    };
+    let none = place(&mut h, 240.0);
+    assert_eq!(pattern(&h, &none), Format::Date("mm/dd/yyyy".into()), "no preference: Acrobat's");
+    h.state_mut().session.set_date_format("dd.mm.yyyy").unwrap();
+    let dotted = place(&mut h, 280.0);
+    assert_eq!(pattern(&h, &dotted), Format::Date("dd.mm.yyyy".into()), "the preference");
+    // A field would write month names in English: Acrobat's pattern instead.
+    h.state_mut().session.set_date_format("d. mmmm yyyy").unwrap();
+    let named = place(&mut h, 320.0);
+    assert_eq!(pattern(&h, &named), Format::Date("mm/dd/yyyy".into()), "month names");
 }
 
 /// The value of `name` in a saved PDF, read back by opening it in a fresh app.

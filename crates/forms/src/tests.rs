@@ -668,7 +668,7 @@ fn marked_content_borders_field(appearance: &str, label: &str) {
 fn text_and_date_fields_keep_background_and_border_inside_marked_content() {
     let mut doc = one_page();
     add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
-    add_field(&mut doc, 0, [50.0, 660.0, 250.0, 680.0], &NewField::Date, Some("due")).unwrap();
+    add_field(&mut doc, 0, [50.0, 660.0, 250.0, 680.0], &NewField::Date { format: "mm/dd/yyyy".into() }, Some("due")).unwrap();
     let props = || FieldProps {
         look: Some(Look {
             border: Some([0.0; 3]),
@@ -1240,7 +1240,7 @@ fn every_field_type_can_be_added_named_and_drawn() {
     let names: Vec<String> = [
         (NewField::Text { multiline: false }, r(700.0)),
         (NewField::Text { multiline: true }, [50.0, 600.0, 250.0, 680.0]),
-        (NewField::Date, r(560.0)),
+        (NewField::Date { format: "mm/dd/yyyy".into() }, r(560.0)),
         (NewField::CheckBox, [50.0, 520.0, 64.0, 534.0]),
         (NewField::Radio { group: None, export: "Small".into() }, [50.0, 480.0, 64.0, 494.0]),
         (NewField::Combo { options: vec!["Red".into(), "Blue".into()], editable: false }, r(440.0)),
@@ -1805,7 +1805,9 @@ fn new_text_fields_fit_their_box() {
             .and_then(|n| n.parse::<f64>().ok())
             .unwrap_or_else(|| panic!("no /Helv size in {ap}"))
     };
-    for (kind, name, value) in [(NewField::Text { multiline: false }, "short", "Hello world"), (NewField::Date, "date", "10/13/2026")] {
+    for (kind, name, value) in
+        [(NewField::Text { multiline: false }, "short", "Hello world"), (NewField::Date { format: "mm/dd/yyyy".into() }, "date", "10/13/2026")]
+    {
         add_field(&mut doc, 0, [20.0, 20.0, 200.0, 28.0], &kind, Some(name)).unwrap();
         set_value(&mut doc, name, &FieldValue::Text(value.into())).unwrap();
         let f = field(&fields(&doc), name).clone();
@@ -1821,6 +1823,33 @@ fn new_text_fields_fit_their_box() {
     // An explicit size still wins.
     set_props(&mut doc, "short", &FieldProps { font_size: Some(12.0), ..FieldProps::default() }).unwrap();
     assert_eq!(tf_size(&ap(&doc, &field(&fields(&doc), "short").widgets[0])), 12.0);
+}
+
+/// #158: a new date field takes the pattern it is given, where it was always mm/dd/yyyy (Prepare
+/// a form gives it Preferences ▸ Date format when a field can show that). Both scripts, the check
+/// of typed dates and the appearance follow the pattern, and it survives a save.
+#[test]
+fn a_new_date_field_takes_the_format_it_is_given() {
+    let mut doc = one_page();
+    let dotted = NewField::Date { format: "dd.mm.yyyy".into() };
+    assert_eq!(add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &dotted, None).unwrap(), "Date1");
+    let mut doc = reopen(&doc);
+    let f = field(&fields(&doc), "Date1").clone();
+    assert_eq!(f.actions.format, crate::af::Format::Date("dd.mm.yyyy".into()));
+    let aa = doc.get(f.widgets[0].obj).as_dict().unwrap().get(b"AA").unwrap().as_dict().unwrap().clone();
+    let js = |k: &[u8]| aa.get(k).unwrap().as_dict().unwrap().get(b"JS").unwrap().as_string().unwrap().to_text();
+    assert_eq!(js(b"F"), "AFDate_FormatEx(\"dd.mm.yyyy\");");
+    assert_eq!(js(b"K"), "AFDate_KeystrokeEx(\"dd.mm.yyyy\");");
+    set_value(&mut doc, "Date1", &FieldValue::Text("3.4.2025".into())).unwrap();
+    assert!(ap(&doc, &field(&fields(&doc), "Date1").widgets[0]).contains("(03.04.2025) Tj"), "shown in the pattern");
+    assert!(
+        matches!(set_value(&mut doc, "Date1", &FieldValue::Text("04/15/2025".into())), Err(FormError::Format(_))),
+        "read day first: there is no month 15"
+    );
+    // A pattern with no date in it would refuse every value, so it is refused itself.
+    let before = fields(&doc).len();
+    assert!(add_field(&mut doc, 0, [50.0, 650.0, 250.0, 670.0], &NewField::Date { format: "HH:MM".into() }, None).is_err());
+    assert_eq!(fields(&doc).len(), before);
 }
 
 #[test]

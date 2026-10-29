@@ -4125,6 +4125,34 @@ fn preparing_a_form_through_tools() {
     assert!(matches!(a.call("form_set_image", &json!({ "doc": doc, "field": "size", "path": "pics/a_page_1.png" })), Err(ToolError::Failed(_))));
 }
 
+/// #158: form_add_field gave every date field mm/dd/yyyy. It takes the date format preference
+/// (fill_sign_date_format) when a field can show it, so a German form gets dd.mm.yyyy fields that
+/// read a typed date day first.
+#[test]
+fn new_date_fields_follow_a_numeric_date_format_preference_through_tools() {
+    let dir = workdir("date-fields");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let add = |a: &mut Automation, name: &str, y: i64| {
+        ok(a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "date", "rect": [20, y, 180, y + 22], "name": name }));
+    };
+    add(&mut a, "us", 20);
+    ok(&mut a, "fill_sign_date_format", json!({ "format": "dd.mm.yyyy" }));
+    add(&mut a, "de", 60);
+    ok(&mut a, "fill_sign_date_format", json!({ "format": "d mmmm yyyy" }));
+    add(&mut a, "named", 100);
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "de": "3.4.2025" } }));
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let field = |name: &str| fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == name).unwrap().clone();
+    assert_eq!(field("us")["format"]["pattern"], "mm/dd/yyyy", "no preference: Acrobat's");
+    assert_eq!(field("de")["format"]["pattern"], "dd.mm.yyyy");
+    assert_eq!(field("named")["format"]["pattern"], "mm/dd/yyyy", "a field would write month names in English");
+    assert_eq!((field("de")["value"].as_str(), field("de")["display"].as_str()), (Some("3.4.2025"), Some("03.04.2025")));
+    // Read day first: there is no month 15.
+    let err = a.call("form_fill", &json!({ "doc": doc, "values": { "de": "04/15/2025" } })).unwrap_err();
+    assert!(err.to_string().contains("dd.mm.yyyy"), "{err}");
+}
+
 #[test]
 fn renaming_a_radio_button_to_a_groups_name_joins_the_group_through_tools() {
     // #4949: two buttons placed separately are two groups; naming one after the other makes

@@ -187,7 +187,7 @@ fn add_date_field(h: &mut Harness<'_, PdfCraftApp>) {
     h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
         page: 0,
         rect: [40.0, 240.0, 160.0, 260.0],
-        kind: pdfcraft_engine::NewField::Date,
+        kind: pdfcraft_engine::NewField::Date { format: "mm/dd/yyyy".into() },
         name: Some("due".into()),
     });
     h.run_steps(4);

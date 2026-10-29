@@ -1,6 +1,7 @@
 //! Form tools: list fields, fill them (several at once, one undo step), clear the form, and
 //! prepare a form (add fields one at a time or as a table, change and delete them).
 
+use pdfcraft_engine::dates::date_field_format;
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, Validate};
 use pdfcraft_engine::{CalculationIssue, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
 use serde_json::{Value, json};
@@ -321,7 +322,8 @@ impl Automation {
         };
         let kind = match a.str("type")? {
             "text" => NewField::Text { multiline: a.opt_bool("multiline")?.unwrap_or(false) },
-            "date" => NewField::Date,
+            // Preferences ▸ Date format (fill_sign_date_format) when a field can show it.
+            "date" => NewField::Date { format: date_field_format(self.session.date_format()).to_owned() },
             "checkbox" => NewField::CheckBox,
             "radio" => {
                 NewField::Radio { group: a.opt_str("group")?.map(str::to_owned), export: a.opt_str("export")?.unwrap_or("Choice1").to_owned() }

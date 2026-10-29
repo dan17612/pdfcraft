@@ -654,6 +654,13 @@ fn date_format(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) {
         .small()
         .color(t.text_muted),
     );
+    ui.label(
+        egui::RichText::new(tl!(
+            "New date fields in Prepare a form take this pattern too when it writes the date in numbers only, such as dd.mm.yyyy; otherwise mm/dd/yyyy."
+        ))
+        .small()
+        .color(t.text_muted),
+    );
 }
 
 fn reading_colours_section(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) {

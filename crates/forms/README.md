@@ -77,8 +77,10 @@ let cells: Vec<table::Cell> = grid.cells_for(names)?;      // "Table1_1", "Table
 - `/RV` (rich text) is removed when a value is set so it can't contradict `/V`.
 - New fields follow Acrobat: names Text1, Check Box1, Group1 (radio groups), Dropdown1, List Box1,
   Button1, Date1, Signature1; `/Helv` is added to `/DR`; appearances are drawn at once. Radio
-  buttons joining a group become kid widgets with their own export state. Renaming changes only
-  the last part of a dotted name.
+  buttons joining a group become kid widgets with their own export state. A date field gets
+  `AFDate_FormatEx`/`AFDate_KeystrokeEx` for the pattern it is given (`NewField::Date { format }`;
+  Acrobat's is `af::DEFAULT_DATE_FIELD_FORMAT`, `mm/dd/yyyy`), refused when it has no y, m or d.
+  Renaming changes only the last part of a dotted name.
 - Renaming a field renames it in every Calculate script that reads it
   (`af::rename_in_calculation`): `AFSimple_Calculate` field lists, simplified field notation
   (the `BVCALC` comment and its translation), and `getField` calls whose argument is the name as
